@@ -553,17 +553,13 @@ export const invitationApi = {
       .catch(async (error) => {
         const status = error?.response?.status;
         if (status !== 404) throw error;
-        // Fallback para o endpoint antigo (quando /team/invite-link ainda não existe no backend)
         const fallback = await api.post<Invitation>('/invitations', data);
         return fallback.data;
       })
 };
 
 export const teamApi = {
-  /**
-   * Cria link de convite para equipa
-   * Tenta primeiro o endpoint novo (/team/invite-link) e faz fallback automático para /invitations se der 404
-   */
+ 
   createInviteLink: (data: {
     teamId?: string;
     teamName?: string;
@@ -581,15 +577,7 @@ export const teamApi = {
         role: string;
         email: string | null;
         expiresAt: string;
-      }>('/team/invite-link', data)
-      .then(res => res.data)
-      .catch(async (error) => {
-        const status = error?.response?.status;
-        if (status !== 404) throw error;
-        // Fallback para o endpoint antigo quando o novo ainda não está disponível no backend
-        const fallback = await api.post<Invitation>('/invitations', data);
-        return fallback.data;
-      }),
+      }>('/invitations', data),   
 
   joinByInviteToken: (
     token: string,
