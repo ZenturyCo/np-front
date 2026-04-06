@@ -355,7 +355,7 @@ export default function Team() {
       <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Adicionar Membro</DialogTitle>
+            <DialogTitle>Convidar membros para a equipa</DialogTitle>
             <DialogDescription>Envie um convite por email.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">

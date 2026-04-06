@@ -533,7 +533,6 @@ export const meetingApi = {
 };
 
 // ==================== INVITATIONS & USERS ====================
-
 export const invitationApi = {
   create: (data: { email: string; fullName: string; role: string; projectId?: string; teamName?: string }) =>
     api
@@ -554,12 +553,17 @@ export const invitationApi = {
       .catch(async (error) => {
         const status = error?.response?.status;
         if (status !== 404) throw error;
+        // Fallback para o endpoint antigo (quando /team/invite-link ainda não existe no backend)
         const fallback = await api.post<Invitation>('/invitations', data);
         return fallback.data;
       })
 };
 
 export const teamApi = {
+  /**
+   * Cria link de convite para equipa
+   * Tenta primeiro o endpoint novo (/team/invite-link) e faz fallback automático para /invitations se der 404
+   */
   createInviteLink: (data: {
     teamId?: string;
     teamName?: string;
@@ -578,7 +582,14 @@ export const teamApi = {
         email: string | null;
         expiresAt: string;
       }>('/team/invite-link', data)
-      .then(res => res.data),
+      .then(res => res.data)
+      .catch(async (error) => {
+        const status = error?.response?.status;
+        if (status !== 404) throw error;
+        // Fallback para o endpoint antigo quando o novo ainda não está disponível no backend
+        const fallback = await api.post<Invitation>('/invitations', data);
+        return fallback.data;
+      }),
 
   joinByInviteToken: (
     token: string,
@@ -603,9 +614,9 @@ export const userApi = {
   updateRole: (id: string, role: string) => api.patch<void>(`/users/${id}`, { role }).then(res => res.data),
   remove: (id: string) => api.delete<void>(`/users/${id}`).then(res => res.data),
 };
-
 // ==================== AUTH CHECK ====================
 
 export function isAuthenticated(): boolean {
   return !!getAccessToken();
 }
+
