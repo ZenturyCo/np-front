@@ -389,6 +389,28 @@ export const authApi = {
 
   users: () =>
     api.get<Array<{ id: string; email: string; fullName: string }>>('/users').then(res => res.data),
+
+  // Multi-step registration endpoints
+  registerMultiStep: (data: any) =>
+    api
+      .post<{
+        accessToken?: string;
+        refreshToken?: string;
+        tokens?: { accessToken: string; refreshToken: string };
+      }>('/auth/register-multi-step', data)
+      .then(res => res.data),
+
+  requestEmailOtp: (email: string) =>
+    api.post<{ success: boolean }>('/auth/request-email-otp', { email }).then(res => res.data),
+
+  verifyEmailOtp: (email: string, otp: string) =>
+    api.post<{ success: boolean }>('/auth/verify-email-otp', { email, otp }).then(res => res.data),
+
+  requestPhoneOtp: (phone: string) =>
+    api.post<{ success: boolean }>('/auth/request-phone-otp', { phone }).then(res => res.data),
+
+  verifyPhoneOtp: (phone: string, otp: string) =>
+    api.post<{ success: boolean }>('/auth/verify-phone-otp', { phone, otp }).then(res => res.data),
 };
 
 // ==================== MAIN APIS ====================

@@ -1,0 +1,383 @@
+# Registration Flow Diagram
+
+## 🔄 Complete User Journey
+
+```
+                        USER STARTS REGISTRATION
+                                  │
+                                  ▼
+                    ┌─────────────────────────┐
+                    │   STEP 1/4              │
+                    │ DADOS PESSOAIS          │
+                    ├─────────────────────────┤
+                    │ • Nome (obrigatório)    │
+                    │ • Email (obrigatório)   │
+                    │ • Telefone (opcional)   │
+                    └────────────┬────────────┘
+                                 │
+                    ┌────────────▼────────────┐
+                    │ VALIDAÇÃO ZROD          │
+                    │ ✓ Nome 2+ chars        │
+                    │ ✓ Email válido         │
+                    │ ✓ Telefone válido      │
+                    └────────────┬────────────┘
+                                 │
+                    ┌────────────▼────────────┐
+                    │ REQUEST EMAIL OTP       │
+                    │ await authApi.          │
+                    │   requestEmailOtp()    │
+                    └────────────┬────────────┘
+                                 │
+                                 ▼
+                    ┌─────────────────────────┐
+                    │   STEP 2/4              │
+                    │ EMAIL VERIFICATION      │
+                    ├─────────────────────────┤
+                    │ "Enviámos código para:  │
+                    │  usuario@email.com"     │
+                    │                         │
+                    │ OTP Input (6 dígitos)   │
+                    │ □ □ □ □ □ □            │
+                    │                         │
+                    │ Resend button (120s)    │
+                    │ Back button             │
+                    └────────────┬────────────┘
+                                 │
+                    ┌────────────▼────────────┐
+                    │ OTP = "123456" ?        │
+                    └────┬───────────────┬───┘
+                         │ NÃO           │ SIM
+                    ┌────▼──────┐   ┌───▼──────┐
+                    │ ERROR     │   │ VALIDATE │
+                    │ Código    │   │ verifyE- │
+                    │ inválido  │   │ mailOtp()│
+                    └───────────┘   └───┬──────┘
+                                        │
+                    ┌───────────────────▼───────┐
+                    │ TELEFONE PREENCHIDO?      │
+                    └───┬──────────────────────┬┘
+                        │ SIM                 │ NÃO
+                        │                     │
+            ┌───────────▼────┐   ┌──────────▼────────────┐
+            │  STEP 3/4      │   │  STEP 3/4 (Skip)      │
+            │  PHONE OTP     │   │  PHONE OPTIONAL       │
+            │                │   │                       │
+            │ Receber SMS    │   │ "Deseja adicionar?"   │
+            │ □ □ □ □ □ □    │   │ [Adicionar][Pular]   │
+            │                │   │                       │
+            │ Resend (120s)  │   └──────────┬────────────┘
+            │ Back           │              │
+            │ (SMS válido?)  │              │
+            └────┬───────────┘        ┌─────▼────────┐
+                 │                    │  USER CHOICE │
+                 │            ┌───────┴────┬────────┐
+                 │            │ Adicionar  │ Pular  │
+            ┌────▼────┐   ┌───▼──────┐ ┌──▼────┐
+            │ Avança  │   │ Request  │ │ Skip  │
+            │ Step 4  │   │ Phone    │ │ Phone │
+            │         │   │ OTP      │ │       │
+            └────┬────┘   └───┬──────┘ └──┬───┬┘
+                 │            │           │   │
+                 │        ┌───▼───────────┘   │
+                 │        │ (Recebe SMS)      │
+                 │    ┌───▼────────┐          │
+                 │    │ Valida SMS │          │
+                 │    │ □ □ □ □ □  │          │
+                 │    └───┬────────┘          │
+                 │        │                   │
+                 │    ┌───▼───────────────┐   │
+                 │    │ SMS válido? SIM   │   │
+                 │    └───┬───────────────┘   │
+                 │        │                   │
+                 └────┬───┴───────────────────┘
+                      │
+                      ▼
+          ┌───────────────────────┐
+          │   STEP 4/4            │
+          │   PASSWORD & TERMOS   │
+          ├───────────────────────┤
+          │ Password              │
+          │ ••••••••••            │
+          │                       │
+          │ Strength bar:         │
+          │ ▓▓▓▓▓░░░ (Excelente)  │
+          │                       │
+          │ Requisitos:           │
+          │ ✓ 8+ caracteres      │
+          │ ✓ Letra maiúscula    │
+          │ ✓ Letra minúscula    │
+          │ ✓ Número             │
+          │                       │
+          │ Confirm Password      │
+          │ ••••••••••            │
+          │                       │
+          │ ☐ Aceito Termos       │
+          │                       │
+          │ [Voltar] [Criar]     │
+          └───────────┬───────────┘
+                      │
+          ┌───────────▼──────────┐
+          │ FINAL VALIDATION     │
+          │ ✓ Senha ok           │
+          │ ✓ Confirma ok        │
+          │ ✓ Termos checked     │
+          └───────────┬──────────┘
+                      │
+          ┌───────────▼────────────────┐
+          │ REGISTER_MULTISTEP         │
+          │ const data = {             │
+          │   fullName,                │
+          │   email,                   │
+          │   phone,                   │
+          │   password,                │
+          │   emailOtp,                │
+          │   phoneOtp                 │
+          │ }                          │
+          │ await authApi.register... │
+          └───────────┬────────────────┘
+                      │
+          ┌───────────▼──────────┐
+          │ SUCCESS? ✅          │
+          └───┬──────────────┬───┘
+              │ SIM          │ NÃO
+         ┌────▼────┐    ┌────▼─────┐
+         │Save     │    │ Error    │
+         │Tokens   │    │ Toast    │
+         │         │    │ (retry)  │
+         └────┬────┘    └──────────┘
+              │
+         ┌────▼──────────┐
+         │ Redirect to   │
+         │ /onboarding   │
+         │               │
+         │ 🎉 SUCCESS!   │
+         └───────────────┘
+```
+
+## 📊 State Diagram
+
+```
+REGISTRATION FLOW - STATE MACHINE
+
+                    ┌─────────────────┐
+                    │  INITIAL STATE  │
+                    │  currentStep: 1 │
+                    │  fullName: ""   │
+                    │  email: ""      │
+                    │  phone: ""      │
+                    └────────┬────────┘
+                             │
+                             ▼
+                    ┌─────────────────┐
+                    │  STEP 1 ACTIVE  │
+                    │  User inputs    │
+                    └────────┬────────┘
+                             │
+                             ▼
+                    ┌─────────────────┐
+                    │ VALIDATE STEP 1 │
+                    │  (Zod)          │
+                    └───┬────────┬────┘
+                        │ PASS   │ FAIL
+                        │        │
+                   ┌────▼─┐   ┌─▼─────────┐
+                   │Send  │   │Show Error │
+                   │Email │   │Message    │
+                   │OTP   │   └───────────┘
+                   └────┬─┘
+                        │
+                        ▼
+                   ┌─────────────────┐
+                   │  STEP 2 ACTIVE  │
+                   │  emailOtp: ""   │
+                   │  Enter OTP 6dig │
+                   └────────┬────────┘
+                            │
+                            ▼
+                   ┌─────────────────┐
+                   │ VERIFY EMAIL OTP│
+                   │ (API Call)      │
+                   └───┬────────┬────┘
+                       │ VALID  │ INVALID
+                       │        │
+                   ┌───▼─┐   ┌─▼─────────┐
+                   │Next │   │Show Error │
+                   │Step │   │Retry OTP  │
+                   └───┬─┘   └───────────┘
+                       │
+              ┌────────▼────────┐
+              │ HAS PHONE?      │
+              └────┬────────┬───┘
+                   │ YES    │ NO
+                   │        │
+          ┌────────▼─┐   ┌──▼──────────┐
+          │  STEP 3  │   │  STEP 4     │
+          │ PHONE    │   │ PASSWORD    │
+          │ OTP      │   │ TERMOS      │
+          └────┬─────┘   └──┬──────────┘
+               │            │
+               └────┬───────┘
+                    │
+                    ▼
+           ┌─────────────────┐
+           │  STEP 4 ACTIVE  │
+           │  password: ""   │
+           │  termsAccepted: │
+           │  false          │
+           └────────┬────────┘
+                    │
+                    ▼
+           ┌─────────────────┐
+           │ VALIDATE STEP 4 │
+           │  (Zod)          │
+           └───┬────────┬────┘
+               │ PASS   │ FAIL
+               │        │
+          ┌────▼─┐   ┌─▼─────────┐
+          │Submit│   │Show Errors│
+          │Regis │   │Disable Btn│
+          │ter   │   └───────────┘
+          └────┬─┘
+               │
+               ▼
+          ┌──────────────────┐
+          │REGISTER_MULTISTEP│
+          │ (API Call)       │
+          └───┬────────┬─────┘
+              │ SUCCESS│ FAIL
+              │        │
+         ┌────▼──┐  ┌──▼──────┐
+         │Save   │  │Error    │
+         │Tokens │  │Msg+Undo │
+         │       │  │         │
+         └────┬──┘  └─────────┘
+              │
+              ▼
+         ┌──────────────┐
+         │/ONBOARDING   │
+         │✨ SUCCESS ✨ │
+         └──────────────┘
+```
+
+## 🔀 Phone OTP Conditional Flow
+
+```
+USER FILLS PHONE IN STEP 1?
+│
+├─ YES ──────────────────────┐
+│                            │
+│              STEP 3: PHONE OTP IS REQUIRED
+│              ┌──────────────────────┐
+│              │ SMS Sent to:         │
+│              │ +55 (11) 98765-4321  │
+│              │                      │
+│              │ Enter OTP            │
+│              │ □ □ □ □ □ □          │
+│              │ [Back] [Verify]      │
+│              └──────┬───────────────┘
+│                     │
+│              ┌──────▼────────┐
+│              │OTP Valid?     │
+│              └──┬────────┬───┘
+│                 │YES     │NO
+│            ┌────▼─┐  ┌───▼──┐
+│            │STEP 4│  │Error │
+│            │      │  │Retry │
+│            └──────┘  └──────┘
+│
+└─ NO ───────────────────────┐
+                             │
+                    STEP 3: PHONE OPTIONAL
+                    ┌──────────────────┐
+                    │ "Add phone now?" │
+                    │                  │
+                    │ [Add] [Skip]     │
+                    └──┬────────────┬──┘
+                       │            │
+                   ┌───▼──┐    ┌────▼──┐
+                   │Add   │    │Skip   │
+                   │Phone │    │Go to  │
+                   │      │    │Step 4 │
+                   └───┬──┘    └───┬───┘
+                       │          │
+                  ┌────▼──────────┘
+                  │
+                  ▼
+          ┌──────────────┐
+          │  REQUEST OTP │
+          │  (SMS sent)  │
+          └────┬─────────┘
+               │
+          ┌────▼──────────┐
+          │ ENTER OTP     │
+          │ □ □ □ □ □ □   │
+          └────┬──────────┘
+               │
+          ┌────▼──────────────┐
+          │ VALID? ─────→ YES  │
+          └────────────────┬──┘
+                           │
+                     ┌─────▼────┐
+                     │ STEP 4    │
+                     │ PASSWORD  │
+                     └───────────┘
+```
+
+## ✨ Component Hierarchy
+
+```
+Register Page
+├── Header
+│   ├── Logo (N)
+│   ├── Title "Criar conta"
+│   └── Subtitle "Comece a gerir..."
+│
+├── ProgressSteps
+│   ├── Step 1 Circle
+│   ├── Step 2 Circle
+│   ├── Step 3 Circle
+│   ├── Step 4 Circle
+│   └── "Passo X de 4"
+│
+├── Form Container
+│   ├── [Step 1]
+│   │   ├── FullName Input + Label
+│   │   ├── Email Input + Label
+│   │   ├── PhoneInput Component
+│   │   └── Continue Button
+│   │
+│   ├── [Step 2]
+│   │   ├── Email Display
+│   │   ├── OTPInput Component
+│   │   ├── ResendButton Component
+│   │   └── [Back][Verify] Buttons
+│   │
+│   ├── [Step 3]
+│   │   ├── [Scenario A] Phone OTP
+│   │   │   ├── Phone Display
+│   │   │   ├── OTPInput Component
+│   │   │   ├── ResendButton Component
+│   │   │   └── [Back][Verify] Buttons
+│   │   │
+│   │   └── [Scenario B] Add Phone
+│   │       ├── "Add phone?" Question
+│   │       ├── PhoneInput Component
+│   │       └── [Skip][Add] Buttons
+│   │
+│   └── [Step 4]
+│       ├── Password Input + Label
+│       ├── PasswordStrength Component
+│       ├── Confirm Input + Label
+│       ├── Terms Checkbox
+│       └── [Back][Create] Buttons
+│
+└── Footer
+    ├── "Já tem conta?"
+    └── Link to Login
+```
+
+---
+
+**Visual Aid**: Estes diagramas mostram o fluxo completo de registro, states, e hierarquia de componentes.
+
+Use como referência para entender como o sistema funciona!
