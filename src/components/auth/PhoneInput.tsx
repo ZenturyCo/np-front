@@ -31,7 +31,7 @@ export function PhoneInput({
   onChange,
   countryCode = '+55',
   onCountryCodeChange,
-  placeholder = (11) 98765-4321',
+  placeholder = '(11) 98765-4321',
   error,
   disabled = false,
 }: PhoneInputProps) {
