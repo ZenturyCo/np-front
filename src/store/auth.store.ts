@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { setTokens, clearTokens } from '@/lib/auth.tokens';
 
-const API = "https://drucci.pt/api/v1";
+const API = "https://api.drucci.pt/api/v1";
 
 // ============================================================
 // TYPES
