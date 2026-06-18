@@ -1,441 +1,710 @@
-import { useState, useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  Users, CheckCircle, TrendingUp, Activity, Search, Plus, Eye,
-  MessageCircle, Shield, UserMinus, AlertCircle, RefreshCw,
+  Users, CheckCircle, TrendingUp, Activity,
+  Search, Plus, AlertCircle, RefreshCw,
+  UserPlus, LogIn, Copy, Check, X,
 } from "lucide-react";
-import { MetricCard } from "@/components/MetricCard";
-import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
+
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 import {
-  Dialog, DialogContent, DialogDescription, DialogFooter,
-  DialogHeader, DialogTitle,
+  Dialog, DialogContent, DialogHeader,
+  DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select, SelectContent, SelectItem,
+  SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Label } from "@/components/ui/label";
-import { cn } from "@/lib/utils";
-import { useToast } from "@/hooks/use-toast";
-import { userApi, invitationApi, type TeamMember } from "@/lib/api";
+import { teamsApi, type BackendTeam, type TeamMember } from "@/lib/api";
 import { useAuthStore } from "@/store/auth.store";
 
-// ── Helpers ──────────────────────────────────────────────────
+// ─────────────────────────────────────────────
+// Utilitários
+// ─────────────────────────────────────────────
+const PALETTE = [
+  "#6366f1","#8b5cf6","#ec4899","#f59e0b",
+  "#10b981","#3b82f6","#ef4444","#14b8a6",
+];
 
-const presenceColors: Record<string, string> = {
-  online: "bg-green-500", away: "bg-yellow-500", offline: "bg-muted-foreground/40",
-};
-
-const roleBadge: Record<string, { label: string; style: string }> = {
-  admin:   { label: "Admin",   style: "bg-purple-500/15 text-purple-600 border-purple-500/20" },
-  manager: { label: "Manager", style: "bg-primary/15 text-primary border-primary/20" },
-  member:  { label: "Membro",  style: "bg-muted text-muted-foreground border-border" },
-  viewer:  { label: "Viewer",  style: "bg-muted text-muted-foreground border-border" },
-  guest:   { label: "Guest",   style: "bg-muted text-muted-foreground border-border" },
-};
+function colorForId(id: string): string {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = id.charCodeAt(i) + ((hash << 5) - hash);
+  return PALETTE[Math.abs(hash) % PALETTE.length];
+}
 
 function getInitials(name: string) {
   return (name || "?").split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
 }
 
-const AVATAR_COLORS = [
-  "bg-blue-500", "bg-green-500", "bg-yellow-500", "bg-red-500",
-  "bg-purple-500", "bg-pink-500", "bg-cyan-500", "bg-emerald-500",
-];
-function getAvatarColor(id: string) {
-  let hash = 0;
-  for (const c of id) hash = (hash * 31 + c.charCodeAt(0)) & 0xffffffff;
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
-}
-
-// Normaliza membros que chegam da API sem campos de stats
-function normalizeMember(m: any): TeamMember & {
-  completedTasks: number; totalTasks: number; onTimeRate: number;
-  projects: { id: string; name: string }[]; presence: string;
-} {
-  return {
-    ...m,
-    fullName:       m.fullName || m.name || m.email || "Sem nome",
-    role:           m.role || "member",
-    presence:       m.presence || "offline",
-    completedTasks: m.completedTasks ?? 0,
-    totalTasks:     m.totalTasks ?? 0,
-    onTimeRate:     m.onTimeRate ?? 0,
-    projects:       Array.isArray(m.projects) ? m.projects : [],
-  };
-}
+const presenceRing: Record<string, string> = {
+  online:  "ring-emerald-500",
+  away:    "ring-amber-500",
+  offline: "ring-muted-foreground/40",
+};
 
 const filterTabs = [
-  { id: "all",     label: "Todos" },
-  { id: "admin",   label: "Admins" },
-  { id: "manager", label: "Managers" },
-  { id: "member",  label: "Membros" },
-  { id: "online",  label: "Online" },
-];
+  { id: "all",    label: "Todas" },
+  { id: "online", label: "Com membros online" },
+  { id: "large",  label: "3+ membros" },
+] as const;
+type FilterId = (typeof filterTabs)[number]["id"];
 
-// ── Member Card ──────────────────────────────────────────────
-
-function MemberCard({ member, isAdmin, currentUserId, onViewProfile, onSendMessage, onChangeRole, onRemove }: {
-  member: ReturnType<typeof normalizeMember>;
-  isAdmin: boolean;
-  currentUserId?: string;
-  onViewProfile: () => void;
-  onSendMessage: () => void;
-  onChangeRole: () => void;
-  onRemove: () => void;
+// ─────────────────────────────────────────────
+// MetricCard
+// ─────────────────────────────────────────────
+function MetricCard({ label, value, icon, tone = "default" }: {
+  label: string; value: number | string;
+  icon: React.ReactNode; tone?: "default" | "emerald" | "amber";
 }) {
-  const badge = roleBadge[member.role] || roleBadge.member;
-  const isSelf = member.id === currentUserId;
-
+  const toneClasses = {
+    default: "bg-primary/10 text-primary",
+    emerald: "bg-emerald-500/15 text-emerald-600",
+    amber:   "bg-amber-500/15 text-amber-600",
+  }[tone];
   return (
-    <div className="group relative rounded-xl border bg-card p-5 shadow-sm transition-all hover:shadow-md">
-      <div className="flex items-center gap-3">
-        <div className="relative shrink-0">
-          <div className={cn(
-            "flex h-12 w-12 items-center justify-center rounded-full text-sm font-bold text-white",
-            getAvatarColor(member.id)
-          )}>
-            {getInitials(member.fullName)}
-          </div>
-          <span className={cn(
-            "absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-card",
-            presenceColors[member.presence] || presenceColors.offline
-          )} />
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold truncate">{member.fullName}</p>
-          <p className="text-xs text-muted-foreground truncate">{member.email}</p>
-        </div>
-        <span className={cn("rounded-full border px-2 py-0.5 text-[11px] font-semibold shrink-0", badge.style)}>
-          {badge.label}
-        </span>
+    <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+      <div className="flex items-center justify-between">
+        <span className="text-sm text-muted-foreground">{label}</span>
+        <span className={cn("flex h-8 w-8 items-center justify-center rounded-lg", toneClasses)}>{icon}</span>
       </div>
-
-      {/* Projectos */}
-      {member.projects.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-1">
-          {member.projects.slice(0, 2).map((p) => (
-            <span key={p.id} className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
-              {p.name}
-            </span>
-          ))}
-          {member.projects.length > 2 && (
-            <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
-              +{member.projects.length - 2}
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* Acções hover */}
-      <div className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1 rounded-b-xl bg-card/95 py-2 opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100 border-t">
-        <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" onClick={onViewProfile}>
-          <Eye className="h-3 w-3" /> Ver perfil
-        </Button>
-        {!isSelf && (
-          <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" onClick={onSendMessage}>
-            <MessageCircle className="h-3 w-3" /> Mensagem
-          </Button>
-        )}
-        {isAdmin && !isSelf && member.role !== "admin" && (
-          <>
-            <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" onClick={onChangeRole}>
-              <Shield className="h-3 w-3" /> Role
-            </Button>
-            <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs text-destructive hover:text-destructive" onClick={onRemove}>
-              <UserMinus className="h-3 w-3" /> Remover
-            </Button>
-          </>
-        )}
-      </div>
+      <div className="mt-3 text-2xl font-semibold text-foreground">{value}</div>
     </div>
   );
 }
 
-// ── Main ─────────────────────────────────────────────────────
+// ─────────────────────────────────────────────
+// TeamCard
+// ─────────────────────────────────────────────
+function TeamCard({ team, members, onOpenDetails }: {
+  team: BackendTeam; members: TeamMember[]; onOpenDetails: () => void;
+}) {
+  const color    = team.avatarColor || colorForId(team.id);
+  const online   = members.filter((m) => m.presence === "online").length;
+  const completed = members.reduce((s, m) => s + (m.completedTasks ?? 0), 0);
+  const onTime   = members.length
+    ? Math.round(members.reduce((s, m) => s + (m.onTimeRate ?? 0), 0) / members.length)
+    : 0;
+  const visible  = members.slice(0, 6);
+  const overflow = Math.max(0, members.length - visible.length);
 
-export default function Team() {
-  const { toast } = useToast();
-  const qc = useQueryClient();
-  const { user: currentUser } = useAuthStore();
+  return (
+    <div className="group flex flex-col gap-5 rounded-2xl border border-border bg-card p-6 shadow-sm transition-all hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-lg">
+      <div className="flex items-start gap-4">
+        <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl text-lg font-semibold text-white shadow-sm" style={{ backgroundColor: color }}>
+          {getInitials(team.name)}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="truncate text-lg font-semibold text-foreground">{team.name}</h3>
+            <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+              {members.length} {members.length === 1 ? "membro" : "membros"}
+            </span>
+          </div>
+          {team.description && <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{team.description}</p>}
+        </div>
+      </div>
 
-  const [filter, setFilter]           = useState("all");
-  const [search, setSearch]           = useState("");
-  const [inviteOpen, setInviteOpen]   = useState(false);
-  const [profileOpen, setProfileOpen] = useState(false);
-  const [removeOpen, setRemoveOpen]   = useState(false);
-  const [roleOpen, setRoleOpen]       = useState(false);
-  const [selectedMember, setSelectedMember] = useState<ReturnType<typeof normalizeMember> | null>(null);
-  const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteName, setInviteName]   = useState("");
-  const [inviteRole, setInviteRole]   = useState("member");
-  const [newRole, setNewRole]         = useState("");
+      <div className="flex items-center">
+        <div className="flex -space-x-2">
+          {visible.map((m) => (
+            <div key={m.id} title={m.fullName}
+              className={cn("flex h-9 w-9 items-center justify-center rounded-full border-2 border-card bg-muted text-xs font-medium text-foreground ring-2", presenceRing[m.presence ?? "offline"])}>
+              {getInitials(m.fullName)}
+            </div>
+          ))}
+          {overflow > 0 && (
+            <div className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-card bg-muted text-xs font-medium text-muted-foreground">+{overflow}</div>
+          )}
+          {members.length === 0 && <span className="text-sm text-muted-foreground">Sem membros ainda</span>}
+        </div>
+        <div className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
+          <span className="h-2 w-2 rounded-full bg-emerald-500" />{online} online
+        </div>
+      </div>
 
-  const { data: rawMembers = [], isLoading, isError, refetch } = useQuery({
-    queryKey: ["team-members"],
-    queryFn: userApi.list,
-    retry: 1,
-  });
+      <div className="grid grid-cols-3 gap-3 border-t border-border pt-4">
+        <Metric icon={<Users className="h-4 w-4" />}       label="Membros"    value={members.length} />
+        <Metric icon={<CheckCircle className="h-4 w-4" />} label="Concluídas" value={completed} />
+        <Metric icon={<TrendingUp className="h-4 w-4" />}  label="No prazo"   value={`${onTime}%`} />
+      </div>
 
-  const members = useMemo(() => (rawMembers as any[]).map(normalizeMember), [rawMembers]);
-
-  const filtered = useMemo(() => {
-    let r = members;
-    if (filter === "online") r = r.filter((m) => m.presence === "online");
-    else if (filter !== "all") r = r.filter((m) => m.role === filter);
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      r = r.filter((m) => m.fullName.toLowerCase().includes(q) || m.email.toLowerCase().includes(q));
-    }
-    return r;
-  }, [members, filter, search]);
-
-  const inviteMutation = useMutation({
-    mutationFn: (data: { email: string; fullName: string; role: string }) => invitationApi.create(data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["team-members"] });
-      toast({ title: "Convite enviado!", description: `Convite enviado para ${inviteEmail}` });
-      setInviteOpen(false); setInviteEmail(""); setInviteName(""); setInviteRole("member");
-    },
-    onError: (err: any) => toast({ title: "Erro", description: err?.message || "Falha ao enviar convite.", variant: "destructive" }),
-  });
-
-  const removeMutation = useMutation({
-    mutationFn: (id: string) => userApi.remove(id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["team-members"] });
-      toast({ title: "Membro removido" });
-      setRemoveOpen(false); setSelectedMember(null);
-    },
-    onError: (err: any) => toast({ title: "Erro", description: err?.message, variant: "destructive" }),
-  });
-
-  const roleChangeMutation = useMutation({
-    mutationFn: ({ id, role }: { id: string; role: string }) => userApi.updateRole(id, role),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["team-members"] });
-      toast({ title: "Role alterado!" });
-      setRoleOpen(false); setSelectedMember(null);
-    },
-    onError: (err: any) => toast({ title: "Erro", description: err?.message, variant: "destructive" }),
-  });
-
-  const isAdmin = currentUser?.role === "admin";
-  const onlineNow = members.filter((m) => m.presence === "online").length;
-
-  const metrics = [
-    { title: "Total Membros",   value: members.length, icon: Users,       color: "primary" as const },
-    { title: "Membros Activos", value: onlineNow,       icon: Activity,    color: "success" as const },
-    { title: "Admins",          value: members.filter(m => m.role === "admin").length,   icon: Shield,     color: "primary" as const },
-    { title: "Managers",        value: members.filter(m => m.role === "manager").length, icon: TrendingUp, color: "primary" as const },
-  ];
-
-  if (isError) return (
-    <div className="flex flex-col items-center justify-center rounded-xl border bg-card p-12 shadow-sm gap-4">
-      <AlertCircle className="h-12 w-12 text-destructive" />
-      <h3 className="text-lg font-semibold">Erro ao carregar equipa</h3>
-      <p className="text-sm text-muted-foreground">Verifique a ligação à API</p>
-      <Button variant="outline" className="gap-2" onClick={() => refetch()}>
-        <RefreshCw className="h-4 w-4" /> Tentar novamente
+      <Button variant="outline" size="sm" className="w-full" onClick={onOpenDetails}>
+        <Activity className="mr-2 h-4 w-4" /> Ver detalhes
       </Button>
     </div>
   );
+}
+
+function Metric({ icon, label, value }: { icon: React.ReactNode; label: string; value: number | string }) {
+  return (
+    <div className="flex flex-col">
+      <div className="flex items-center gap-1 text-xs text-muted-foreground">{icon}{label}</div>
+      <div className="mt-1 text-lg font-semibold text-foreground">{value}</div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// CreateTeamCard
+// ─────────────────────────────────────────────
+function CreateTeamCard({ onClick }: { onClick: () => void }) {
+  return (
+    <button onClick={onClick}
+      className="group flex min-h-[280px] flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-border bg-card/40 p-6 text-muted-foreground transition-all hover:-translate-y-0.5 hover:border-foreground/40 hover:bg-card hover:text-foreground">
+      <div className="flex h-14 w-14 items-center justify-center rounded-xl border-2 border-dashed border-current text-2xl font-light transition-transform group-hover:scale-110">+</div>
+      <div className="text-center">
+        <div className="font-medium">Criar nova equipa</div>
+        <div className="mt-1 text-xs">Convida membros e organiza o trabalho</div>
+      </div>
+    </button>
+  );
+}
+
+// ─────────────────────────────────────────────
+// ✅ CreateTeamDialog — modal dedicado para criar equipa
+// ─────────────────────────────────────────────
+function CreateTeamDialog({ open, onOpenChange, onCreated }: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  onCreated: (teamId: string) => void;
+}) {
+  const [name, setName]               = useState("");
+  const [description, setDescription] = useState("");
+  const [color, setColor]             = useState(PALETTE[0]);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole]   = useState<"member" | "admin" | "manager" | "viewer" | "guest">("member");
+  const [inviteLink, setInviteLink]   = useState<string | null>(null);
+  const [copied, setCopied]           = useState(false);
+
+  function reset() {
+    setName(""); setDescription(""); setColor(PALETTE[0]);
+    setInviteEmail(""); setInviteLink(null); setCopied(false);
+  }
+
+  const createMutation = useMutation({
+    mutationFn: () =>
+      teamsApi.createInviteLink({
+        teamName:      name.trim(),
+        description:   description.trim() || undefined,
+        email:         inviteEmail.trim() || undefined,
+        role:          inviteRole,
+        expiresInDays: 7,
+      }),
+    onSuccess: (data) => {
+      setInviteLink(data.inviteUrl || `${window.location.origin}/join/${data.token}`);
+      toast.success(`Equipa "${name}" criada com sucesso!`);
+      onCreated(data.teamId);
+    },
+    onError: () => toast.error("Erro ao criar equipa. Tenta novamente."),
+  });
+
+  function copyLink() {
+    if (!inviteLink) return;
+    navigator.clipboard.writeText(inviteLink);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+    toast.success("Link copiado!");
+  }
+
+  const canSubmit = name.trim().length >= 2;
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) reset(); }}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Criar nova equipa</DialogTitle>
+          <DialogDescription>Define o nome e convida o primeiro membro via link.</DialogDescription>
+        </DialogHeader>
+
+        {!inviteLink ? (
+          <>
+            <div className="space-y-4 py-2">
+              {/* Preview */}
+              <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/40 p-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl text-base font-semibold text-white"
+                  style={{ backgroundColor: color }}>
+                  {getInitials(name || "NE")}
+                </div>
+                <div className="min-w-0">
+                  <div className="truncate font-medium text-foreground">{name || "Nome da equipa"}</div>
+                  <div className="truncate text-xs text-muted-foreground">{description || "Descrição..."}</div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Nome da equipa *</Label>
+                <Input placeholder="Ex.: Engenharia" value={name} onChange={(e) => setName(e.target.value)} />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Descrição (opcional)</Label>
+                <Textarea placeholder="O que faz esta equipa?" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
+              </div>
+
+              {/* Cor */}
+              <div className="space-y-2">
+                <Label>Cor do avatar</Label>
+                <div className="flex flex-wrap gap-2">
+                  {PALETTE.map((c) => (
+                    <button key={c} type="button" onClick={() => setColor(c)}
+                      className={cn("relative h-8 w-8 rounded-full border-2 transition-transform hover:scale-110", color === c ? "border-foreground" : "border-transparent")}
+                      style={{ backgroundColor: c }}>
+                      {color === c && <Check className="absolute inset-0 m-auto h-4 w-4 text-white" />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Convidar primeiro membro */}
+              <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3">
+                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Convidar primeiro membro (opcional)</Label>
+                <Input type="email" placeholder="email@exemplo.com" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} />
+                <Select value={inviteRole} onValueChange={(v) => setInviteRole(v as typeof inviteRole)}>
+                  <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="admin">Admin</SelectItem>
+                    <SelectItem value="manager">Manager</SelectItem>
+                    <SelectItem value="member">Membro</SelectItem>
+                    <SelectItem value="viewer">Visualizador</SelectItem>
+                    <SelectItem value="guest">Convidado</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
+              <Button onClick={() => createMutation.mutate()} disabled={!canSubmit || createMutation.isPending}>
+                {createMutation.isPending ? "A criar..." : "Criar equipa"}
+              </Button>
+            </DialogFooter>
+          </>
+        ) : (
+          /* Passo 2 — mostrar link gerado */
+          <div className="space-y-4 py-2">
+            <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-4 text-center">
+              <Check className="mx-auto h-8 w-8 text-emerald-600" />
+              <p className="mt-2 font-medium text-foreground">Equipa criada!</p>
+              <p className="mt-1 text-xs text-muted-foreground">Partilha o link abaixo para convidar membros.</p>
+            </div>
+
+            <div className="rounded-lg border border-border bg-muted/50 p-3 space-y-2">
+              <p className="text-xs font-medium text-muted-foreground">Link de convite (válido 7 dias):</p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 truncate rounded bg-muted px-2 py-1.5 text-xs text-foreground">{inviteLink}</code>
+                <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0" onClick={copyLink}>
+                  {copied ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
+                </Button>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button className="w-full" onClick={() => { onOpenChange(false); reset(); }}>
+                <X className="mr-2 h-4 w-4" /> Fechar
+              </Button>
+            </DialogFooter>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─────────────────────────────────────────────
+// JoinTeamDialog
+// ─────────────────────────────────────────────
+function JoinTeamDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+  const { user } = useAuthStore();
+  const qc = useQueryClient();
+  const [token, setToken] = useState("");
+
+  const mutation = useMutation({
+    mutationFn: () => {
+      const extracted = token.trim().split("/").pop() ?? token.trim();
+      return teamsApi.joinByToken(extracted, { email: user?.email, fullName: user?.fullName });
+    },
+    onSuccess: (data) => {
+      toast.success(`Entraste na equipa "${data.teamName}"!`);
+      qc.invalidateQueries({ queryKey: ["teams"] });
+      onOpenChange(false);
+      setToken("");
+    },
+    onError: () => toast.error("Token inválido ou expirado.", { description: "Verifica o link e tenta novamente." }),
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) setToken(""); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Entrar numa equipa</DialogTitle>
+          <DialogDescription>Cola o link de convite ou o código token que recebeste.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="space-y-2">
+            <Label>Link ou código de convite</Label>
+            <Input placeholder="https://... ou só o token" value={token} onChange={(e) => setToken(e.target.value)} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
+          <Button onClick={() => mutation.mutate()} disabled={!token.trim() || mutation.isPending}>
+            <LogIn className="mr-2 h-4 w-4" />
+            {mutation.isPending ? "A entrar..." : "Entrar na equipa"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─────────────────────────────────────────────
+// TeamDetailsDialog
+// ─────────────────────────────────────────────
+function TeamDetailsDialog({ team, members, open, onOpenChange }: {
+  team: BackendTeam | null; members: TeamMember[];
+  open: boolean; onOpenChange: (v: boolean) => void;
+}) {
+  const [tab, setTab]                 = useState<"members" | "invite">("members");
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole]   = useState<"member" | "admin" | "manager" | "viewer" | "guest">("member");
+  const [inviteLink, setInviteLink]   = useState<string | null>(null);
+  const [copied, setCopied]           = useState(false);
+
+  const inviteMutation = useMutation({
+    mutationFn: () => teamsApi.createInviteLink({
+      teamId: team?.id, teamName: team?.name,
+      email: inviteEmail.trim() || undefined,
+      role: inviteRole, expiresInDays: 7,
+    }),
+    onSuccess: (data) => {
+      setInviteLink(data.inviteUrl || `${window.location.origin}/join/${data.token}`);
+      toast.success("Link de convite gerado!");
+      setInviteEmail("");
+    },
+    onError: () => toast.error("Erro ao gerar convite."),
+  });
+
+  function copyLink() {
+    if (!inviteLink) return;
+    navigator.clipboard.writeText(inviteLink);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+    toast.success("Link copiado!");
+  }
+
+  // ✅ Não retorna null — fica montado mas com open=false o Dialog não mostra nada
+  const color = team ? (team.avatarColor || colorForId(team.id)) : PALETTE[0];
+
+  return (
+    <Dialog open={open && !!team} onOpenChange={(v) => {
+      onOpenChange(v);
+      if (!v) { setTab("members"); setInviteLink(null); setInviteEmail(""); }
+    }}>
+      <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden flex flex-col p-0">
+        {team && (
+          <>
+            <DialogHeader className="border-b border-border p-6 pb-4">
+              <div className="flex items-start gap-4">
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl text-lg font-semibold text-white" style={{ backgroundColor: color }}>
+                  {getInitials(team.name)}
+                </div>
+                <div className="flex-1">
+                  <DialogTitle className="text-xl">{team.name}</DialogTitle>
+                  {team.description && <p className="mt-1 text-sm text-muted-foreground">{team.description}</p>}
+                </div>
+              </div>
+              <div className="mt-4 flex gap-1 rounded-lg bg-muted p-1">
+                {(["members", "invite"] as const).map((t) => (
+                  <button key={t} onClick={() => setTab(t)}
+                    className={cn("flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                      tab === t ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>
+                    {t === "members" ? `Membros (${members.length})` : "Convidar membro"}
+                  </button>
+                ))}
+              </div>
+            </DialogHeader>
+
+            <div className="flex-1 overflow-y-auto p-6">
+              {tab === "members" ? (
+                <div className="space-y-2">
+                  {members.length === 0 && (
+                    <div className="py-12 text-center text-sm text-muted-foreground">
+                      Esta equipa ainda não tem membros.
+                      <br />
+                      <button className="mt-2 text-primary underline" onClick={() => setTab("invite")}>Convidar alguém</button>
+                    </div>
+                  )}
+                  {members.map((m) => (
+                    <div key={m.id} className="flex items-center gap-3 rounded-lg border border-border p-3">
+                      <div className="relative">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted text-sm font-medium">{getInitials(m.fullName)}</div>
+                        <span className={cn("absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-card",
+                          m.presence === "online" ? "bg-emerald-500" : m.presence === "away" ? "bg-amber-500" : "bg-muted-foreground/40")} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate font-medium text-foreground">{m.fullName}</div>
+                        <div className="text-xs text-muted-foreground">{m.email}</div>
+                      </div>
+                      <div className="text-right text-xs text-muted-foreground">
+                        <div>{m.completedTasks ?? 0}/{m.totalTasks ?? 0} tarefas</div>
+                        <div>{m.onTimeRate ?? 0}% no prazo</div>
+                      </div>
+                      <span className={cn("rounded-full border px-2 py-0.5 text-xs font-medium",
+                        m.role === "admin"   ? "bg-purple-500/15 text-purple-600 border-purple-500/30" :
+                        m.role === "manager" ? "bg-primary/15 text-primary border-primary/30" :
+                                              "bg-muted text-muted-foreground border-border")}>
+                        {m.role}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="space-y-5">
+                  <p className="text-sm text-muted-foreground">Gera um link de convite para adicionar um novo membro. Expira em 7 dias.</p>
+                  <div className="space-y-2">
+                    <Label>Email do convidado (opcional)</Label>
+                    <Input type="email" placeholder="nome@exemplo.com" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} />
+                    <p className="text-xs text-muted-foreground">Se preenchido, o convite fica reservado para este email.</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Papel na equipa</Label>
+                    <Select value={inviteRole} onValueChange={(v) => setInviteRole(v as typeof inviteRole)}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="admin">Admin</SelectItem>
+                        <SelectItem value="manager">Manager</SelectItem>
+                        <SelectItem value="member">Membro</SelectItem>
+                        <SelectItem value="viewer">Visualizador</SelectItem>
+                        <SelectItem value="guest">Convidado</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button onClick={() => inviteMutation.mutate()} disabled={inviteMutation.isPending} className="w-full gap-2">
+                    <UserPlus className="h-4 w-4" />
+                    {inviteMutation.isPending ? "A gerar..." : "Gerar link de convite"}
+                  </Button>
+                  {inviteLink && (
+                    <div className="rounded-lg border border-border bg-muted/50 p-3 space-y-2">
+                      <p className="text-xs font-medium text-muted-foreground">Link gerado:</p>
+                      <div className="flex items-center gap-2">
+                        <code className="flex-1 truncate rounded bg-muted px-2 py-1 text-xs text-foreground">{inviteLink}</code>
+                        <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0" onClick={copyLink}>
+                          {copied ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─────────────────────────────────────────────
+// TeamPage — componente principal
+// ─────────────────────────────────────────────
+export default function TeamPage() {
+  const { user } = useAuthStore();
+  const qc = useQueryClient();
+
+  const [filter,       setFilter]      = useState<FilterId>("all");
+  const [search,       setSearch]      = useState("");
+  const [joinOpen,     setJoinOpen]    = useState(false);
+  const [createOpen,   setCreateOpen]  = useState(false); // ✅ estado dedicado para criar
+  const [detailsOpen,  setDetailsOpen] = useState(false);
+  const [selectedId,   setSelectedId]  = useState<string | null>(null);
+
+  const {
+    data: teams = [],
+    isLoading: loadingTeams,
+    isError: errorTeams,
+    refetch: refetchTeams,
+  } = useQuery({
+    queryKey: ["teams"],
+    queryFn:  () => teamsApi.list(),
+    enabled:  !!user,
+    staleTime: 30_000,
+  });
+
+const {
+  data: membersMap = {},
+  isLoading: loadingMembers,
+} = useQuery({
+  queryKey: ["teams-members", teams.map((t) => t.id).join(",")],
+
+  queryFn: async () => {
+    const entries = await Promise.all(
+      teams.map(async (t) => {
+        try {
+          const raw = await teamsApi.members(t.id);
+
+          const members: TeamMember[] =
+            Array.isArray(raw)
+              ? raw
+              : Array.isArray(raw?.members)
+                ? raw.members
+                : Array.isArray(raw?.data)
+                  ? raw.data
+                  : [];
+
+          return [t.id, members] as [string, TeamMember[]];
+        } catch {
+          return [t.id, []] as [string, TeamMember[]];
+        }
+      })
+    );
+
+    return Object.fromEntries(entries) as Record<string, TeamMember[]>;
+  },
+
+  enabled: teams.length > 0,
+  staleTime: 30_000,
+});
+
+  const isLoading = loadingTeams || loadingMembers;
+
+  const totals = useMemo(() => {
+    const allMembers = Object.values(membersMap).flat();
+    const unique     = Array.from(new Map(allMembers.map((m) => [m.id, m])).values());
+    const completed  = unique.reduce((s, m) => s + (m.completedTasks ?? 0), 0);
+    const onTime     = unique.length ? Math.round(unique.reduce((s, m) => s + (m.onTimeRate ?? 0), 0) / unique.length) : 0;
+    const online     = unique.filter((m) => m.presence === "online").length;
+    return { teamsCount: teams.length, online, completed, onTime };
+  }, [teams, membersMap]);
+
+  const filtered = useMemo(() => {
+    let r = teams;
+    if (filter === "online") r = r.filter((t) => (membersMap[t.id] ?? []).some((m) => m.presence === "online"));
+    if (filter === "large")  r = r.filter((t) => (membersMap[t.id] ?? []).length >= 3);
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      r = r.filter((t) =>
+        t.name.toLowerCase().includes(q) ||
+        (t.description ?? "").toLowerCase().includes(q) ||
+        (membersMap[t.id] ?? []).some((m) => m.fullName.toLowerCase().includes(q) || m.email.toLowerCase().includes(q))
+      );
+    }
+    return r;
+  }, [teams, membersMap, filter, search]);
+
+  const selectedTeam    = teams.find((t) => t.id === selectedId) ?? null;
+  const selectedMembers = selectedId ? (membersMap[selectedId] ?? []) : [];
+
+  if (errorTeams) {
+    return (
+      <div className="flex flex-col items-center justify-center rounded-xl border bg-card p-12 shadow-sm">
+        <AlertCircle className="h-12 w-12 text-destructive" />
+        <h3 className="mt-4 text-lg font-semibold text-foreground">Erro ao carregar equipas</h3>
+        <p className="mt-1 text-sm text-muted-foreground">Verifique a ligação e tente novamente.</p>
+        <Button variant="outline" className="mt-4 gap-2" onClick={() => refetchTeams()}>
+          <RefreshCw className="h-4 w-4" /> Tentar novamente
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
+
       {/* Métricas */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         {isLoading
-          ? Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-28 rounded-xl" />)
-          : metrics.map((m) => <MetricCard key={m.title} {...m} />)
+          ? Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-28 rounded-2xl" />)
+          : <>
+              <MetricCard label="Equipas"            value={totals.teamsCount} icon={<Users className="h-4 w-4" />} />
+              <MetricCard label="Membros online"      value={totals.online}     icon={<Activity className="h-4 w-4" />}     tone="emerald" />
+              <MetricCard label="Tarefas concluídas"  value={totals.completed}  icon={<CheckCircle className="h-4 w-4" />} />
+              <MetricCard label="Taxa no prazo"       value={`${totals.onTime}%`} icon={<TrendingUp className="h-4 w-4" />} tone={totals.onTime >= 75 ? "emerald" : "amber"} />
+            </>
         }
       </div>
 
-      {/* Filtros + Search */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex gap-1 rounded-lg bg-muted p-1 overflow-x-auto">
+      {/* Filtros + procura + botões */}
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div className="flex gap-1 rounded-lg bg-muted p-1">
           {filterTabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setFilter(tab.id)}
-              className={cn(
-                "rounded-md px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-colors",
-                filter === tab.id ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-              )}
-            >
+            <button key={tab.id} onClick={() => setFilter(tab.id)}
+              className={cn("rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                filter === tab.id ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>
               {tab.label}
             </button>
           ))}
         </div>
-        <div className="flex gap-2">
-          <div className="relative w-full sm:w-64">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input placeholder="Pesquisar..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
+
+        <div className="flex flex-1 gap-2 md:max-w-lg">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input placeholder="Procurar equipas ou membros..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
           </div>
-          {isAdmin && (
-            <Button size="sm" className="gap-1.5 shrink-0" onClick={() => setInviteOpen(true)}>
-              <Plus className="h-4 w-4" /> Adicionar
-            </Button>
-          )}
+          <Button variant="outline" onClick={() => setJoinOpen(true)} className="gap-2 shrink-0">
+            <LogIn className="h-4 w-4" /> Entrar numa equipa
+          </Button>
+          {/* ✅ Agora abre createOpen, não detailsOpen */}
+          <Button onClick={() => setCreateOpen(true)} className="gap-2 shrink-0">
+            <Plus className="h-4 w-4" /> Nova equipa
+          </Button>
         </div>
       </div>
 
-      {/* Grid de membros */}
+      {/* Grelha */}
       {isLoading ? (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-36 rounded-xl" />)}
-        </div>
-      ) : filtered.length === 0 ? (
-        <div className="rounded-xl border bg-card p-12 text-center">
-          <Users className="mx-auto h-10 w-10 text-muted-foreground/40" />
-          <p className="mt-3 text-sm text-muted-foreground">
-            {search ? `Nenhum membro para "${search}"` : "Nenhum membro neste filtro"}
-          </p>
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-72 rounded-2xl" />)}
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {filtered.map((member) => (
-            <MemberCard
-              key={member.id}
-              member={member}
-              isAdmin={isAdmin}
-              currentUserId={currentUser?.id}
-              onViewProfile={() => { setSelectedMember(member); setProfileOpen(true); }}
-              onSendMessage={() => toast({ title: "Chat", description: `A abrir chat com ${member.fullName}…` })}
-              onChangeRole={() => { setSelectedMember(member); setNewRole(member.role); setRoleOpen(true); }}
-              onRemove={() => { setSelectedMember(member); setRemoveOpen(true); }}
-            />
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
+          {filtered.map((team) => (
+            <TeamCard key={team.id} team={team} members={membersMap[team.id] ?? []}
+              onOpenDetails={() => { setSelectedId(team.id); setDetailsOpen(true); }} />
           ))}
+          {/* ✅ CreateTeamCard também abre createOpen */}
+          {filter === "all" && !search.trim() && (
+            <CreateTeamCard onClick={() => setCreateOpen(true)} />
+          )}
+          {filtered.length === 0 && (
+            <div className="col-span-full rounded-2xl border border-dashed border-border bg-card/40 p-12 text-center">
+              <Users className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
+              <div className="text-sm text-muted-foreground">
+                {search.trim() ? `Nenhuma equipa para "${search}"` : "Nenhuma equipa neste filtro"}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Modal: Convidar */}
-      <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Adicionar Membro</DialogTitle>
-            <DialogDescription>Envie um convite por email.</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <Label>Email *</Label>
-              <Input type="email" placeholder="email@exemplo.com" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} />
-            </div>
-            <div className="space-y-2">
-              <Label>Nome completo *</Label>
-              <Input placeholder="Nome" value={inviteName} onChange={(e) => setInviteName(e.target.value)} />
-            </div>
-            <div className="space-y-2">
-              <Label>Role</Label>
-              <Select value={inviteRole} onValueChange={setInviteRole}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="member">Membro</SelectItem>
-                  <SelectItem value="manager">Manager</SelectItem>
-                  <SelectItem value="admin">Admin</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setInviteOpen(false)}>Cancelar</Button>
-            <Button
-              onClick={() => inviteMutation.mutate({ email: inviteEmail, fullName: inviteName, role: inviteRole })}
-              disabled={inviteMutation.isPending || !inviteEmail || !inviteName}
-            >
-              {inviteMutation.isPending ? "A enviar…" : "Enviar Convite"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* ✅ Modal criar equipa — estado próprio, não depende de selectedTeam */}
+      <CreateTeamDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        onCreated={() => {
+          qc.invalidateQueries({ queryKey: ["teams"] });
+          setCreateOpen(false);
+        }}
+      />
 
-      {/* Modal: Perfil */}
-      <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
-        <DialogContent className="sm:max-w-md">
-          {selectedMember && (
-            <>
-              <DialogHeader>
-                <div className="flex items-center gap-3">
-                  <div className={cn("flex h-14 w-14 items-center justify-center rounded-full text-lg font-bold text-white shrink-0", getAvatarColor(selectedMember.id))}>
-                    {getInitials(selectedMember.fullName)}
-                  </div>
-                  <div>
-                    <DialogTitle>{selectedMember.fullName}</DialogTitle>
-                    <p className="text-sm text-muted-foreground">{selectedMember.email}</p>
-                    <Badge variant="outline" className="mt-1 text-[11px]">
-                      {roleBadge[selectedMember.role]?.label || selectedMember.role}
-                    </Badge>
-                  </div>
-                </div>
-              </DialogHeader>
-              {selectedMember.projects.length > 0 && (
-                <div className="py-2">
-                  <p className="text-xs font-medium text-muted-foreground mb-2">Projectos</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {selectedMember.projects.map((p) => (
-                      <span key={p.id} className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">{p.name}</span>
-                    ))}
-                  </div>
-                </div>
-              )}
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setProfileOpen(false)}>Fechar</Button>
-              </DialogFooter>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
+      {/* Modal entrar por token */}
+      <JoinTeamDialog open={joinOpen} onOpenChange={setJoinOpen} />
 
-      {/* Modal: Alterar Role */}
-      <Dialog open={roleOpen} onOpenChange={setRoleOpen}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Alterar Role</DialogTitle>
-            <DialogDescription>{selectedMember?.fullName}</DialogDescription>
-          </DialogHeader>
-          <Select value={newRole} onValueChange={setNewRole}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="member">Membro</SelectItem>
-              <SelectItem value="manager">Manager</SelectItem>
-              <SelectItem value="admin">Admin</SelectItem>
-            </SelectContent>
-          </Select>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRoleOpen(false)}>Cancelar</Button>
-            <Button
-              onClick={() => selectedMember && roleChangeMutation.mutate({ id: selectedMember.id, role: newRole })}
-              disabled={roleChangeMutation.isPending}
-            >
-              Confirmar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Modal: Remover */}
-      <Dialog open={removeOpen} onOpenChange={setRemoveOpen}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Remover Membro</DialogTitle>
-            <DialogDescription>
-              Tem a certeza que quer remover <strong>{selectedMember?.fullName}</strong>?
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRemoveOpen(false)}>Cancelar</Button>
-            <Button
-              variant="destructive"
-              onClick={() => selectedMember && removeMutation.mutate(selectedMember.id)}
-              disabled={removeMutation.isPending}
-            >
-              {removeMutation.isPending ? "A remover…" : "Remover"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Modal detalhes — só abre quando há equipa seleccionada */}
+      <TeamDetailsDialog
+        team={selectedTeam}
+        members={selectedMembers}
+        open={detailsOpen}
+        onOpenChange={(v) => {
+          setDetailsOpen(v);
+          if (!v) qc.invalidateQueries({ queryKey: ["teams-members"] });
+        }}
+      />
     </div>
   );
 }

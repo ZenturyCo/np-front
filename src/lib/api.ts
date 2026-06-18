@@ -697,28 +697,6 @@ export const teamsApi = {
   ): Promise<{ joined: boolean; teamId: string; teamName: string; userId: string }> =>
     api.post(`/team/join/${token}`, data).then((r) => r.data),
 
-  // POST /team/invite-link
-  createInviteLink: (data: {
-    teamId?:        string;
-    teamName?:      string;
-    description?:   string;
-    email?:         string;
-    role?:          'admin' | 'manager' | 'member' | 'viewer' | 'guest';
-    expiresInDays?: number;
-  }): Promise<{
-    token: string; inviteUrl: string; teamId: string;
-    teamName: string; role: string; email: string | null; expiresAt: string;
-  }> =>
-    api.post('/team/invite-link', data).then((r) => r.data),
-
-  // POST /team/join/:token
-  joinByToken: (
-    token: string,
-    data: { email?: string; fullName?: string; password?: string },
-  ): Promise<{ joined: boolean; teamId: string; teamName: string; userId: string }> =>
-    api.post(`/team/join/${token}`, data).then((r) => r.data),
-};
-
 // ✅ teamApi mantido como alias para não quebrar imports existentes noutros ficheiros
 export const teamApi = {
   createInviteLink: teamsApi.createInviteLink,
