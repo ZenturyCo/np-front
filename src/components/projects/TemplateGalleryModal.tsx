@@ -18,6 +18,7 @@ import { useToast } from "@/hooks/use-toast";
 import { PROJECT_TEMPLATES, INDUSTRIES } from "@/data/projectTemplates";
 import type { ProjectTemplate } from "@/lib/types";
 import { useProjectsStore } from "@/store/projects.store";
+import api from "@/lib/api";
 
 const ICONS: Record<string, LucideIcon> = {
   Radio, HardHat, Flame, Code, Stethoscope, GraduationCap, Landmark,
@@ -41,6 +42,7 @@ export default function TemplateGalleryModal({ open, onOpenChange, onCreated }: 
   const [projectName, setProjectName] = useState("");
   const [projectDesc, setProjectDesc] = useState("");
   const [projectDeadline, setProjectDeadline] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -58,35 +60,73 @@ export default function TemplateGalleryModal({ open, onOpenChange, onCreated }: 
     setConfirmOpen(true);
   };
 
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
     if (!selected || !projectName.trim()) return;
-    const p = createFromTemplate({
-      template: selected,
-      name: projectName.trim(),
-      description: projectDesc.trim() || undefined,
-      deadline: projectDeadline || undefined,
-    });
-    toast({
-      title: "Projeto criado!",
-      description: `${p.name} foi adicionado com ${p.tasks.length} tarefas pré-configuradas.`,
-    });
-    setConfirmOpen(false);
-    onOpenChange(false);
-    onCreated?.(p.id);
-    setSelected(null);
-    setProjectName("");
-    setProjectDesc("");
-    setProjectDeadline("");
+    setLoading(true);
+    try {
+      // Tenta criar na API primeiro
+      const res = await api.post("/projects", {
+        name: projectName.trim(),
+        description: projectDesc.trim() || undefined,
+        deadline: projectDeadline || undefined,
+        templateId: selected.id,
+        industry: selected.industry,
+        methodology: selected.methodology,
+        phases: selected.phases,
+        tasks: selected.tasks,
+      });
+      const projectId = res.data?.id || res.data?.data?.id;
+      toast({
+        title: "Projeto criado!",
+        description: `${projectName} foi criado com ${selected.tasks.length} tarefas pré-configuradas.`,
+      });
+      setConfirmOpen(false);
+      onOpenChange(false);
+      onCreated?.(projectId);
+    } catch (err: any) {
+      // Se a API falhar, guarda localmente como fallback
+      const p = createFromTemplate({
+        template: selected,
+        name: projectName.trim(),
+        description: projectDesc.trim() || undefined,
+        deadline: projectDeadline || undefined,
+      });
+      toast({
+        title: "Projeto criado localmente",
+        description: `${p.name} foi guardado com ${p.tasks.length} tarefas. Será sincronizado quando a ligação for restaurada.`,
+        variant: "destructive",
+      });
+      setConfirmOpen(false);
+      onOpenChange(false);
+      onCreated?.(p.id);
+    } finally {
+      setLoading(false);
+      setSelected(null);
+      setProjectName("");
+      setProjectDesc("");
+      setProjectDeadline("");
+    }
   };
 
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-[1200px] h-[88vh] p-0 overflow-hidden border-border/60 glass-strong">
-          <div className="grid h-full grid-cols-[260px_1fr_400px]">
+        {/* [&>button]:hidden esconde o X automático do shadcn para usarmos o nosso dentro do grid */}
+        <DialogContent className="max-w-[1200px] h-[88vh] p-0 overflow-hidden border-border/60 glass-strong [&>button]:hidden">
+          <div className="grid h-full grid-cols-[260px_1fr_400px] relative">
+
+            {/* Botão fechar — dentro do grid, posicionado absolutamente */}
+            <button
+              onClick={() => onOpenChange(false)}
+              className="absolute top-4 right-4 z-50 h-8 w-8 rounded-full bg-surface-elevated hover:bg-primary/20 flex items-center justify-center transition-colors"
+              aria-label="Fechar"
+            >
+              <X className="h-4 w-4" />
+            </button>
+
             {/* Sidebar — industries */}
-            <aside className="border-r border-border/60 bg-surface/60 flex flex-col">
-              <div className="px-5 py-5 border-b border-border/60">
+            <aside className="border-r border-border/60 bg-surface/60 flex flex-col min-h-0">
+              <div className="px-5 py-5 border-b border-border/60 shrink-0">
                 <div className="flex items-center gap-2">
                   <div className="h-9 w-9 rounded-xl bg-gradient-primary flex items-center justify-center shadow-glow">
                     <Sparkles className="h-4 w-4 text-white" />
@@ -126,9 +166,9 @@ export default function TemplateGalleryModal({ open, onOpenChange, onCreated }: 
               </ScrollArea>
             </aside>
 
-            {/* Grid */}
-            <div className="flex flex-col overflow-hidden">
-              <div className="px-6 py-5 border-b border-border/60 flex items-center justify-between gap-4">
+            {/* Grid de templates */}
+            <div className="flex flex-col min-h-0 overflow-hidden">
+              <div className="px-6 py-5 border-b border-border/60 flex items-center justify-between gap-4 shrink-0">
                 <div>
                   <h2 className="font-display text-xl font-bold">Galeria de Templates</h2>
                   <p className="text-xs text-muted-foreground">
@@ -199,18 +239,18 @@ export default function TemplateGalleryModal({ open, onOpenChange, onCreated }: 
             </div>
 
             {/* Preview */}
-            <aside className="border-l border-border/60 bg-surface/40 flex flex-col overflow-hidden">
+            <aside className="border-l border-border/60 bg-surface/40 flex flex-col min-h-0 overflow-hidden">
               {selected ? (
                 <>
-                  <div className="px-6 py-5 border-b border-border/60">
+                  <div className="px-6 py-5 border-b border-border/60 shrink-0">
                     <Badge variant="outline" className="mb-2 border-primary/40 text-primary text-[10px]">
                       {selected.methodology}
                     </Badge>
                     <h3 className="font-display font-bold text-lg leading-tight">{selected.name}</h3>
                     <p className="text-xs text-muted-foreground mt-1">{selected.industry}</p>
                   </div>
-                  <ScrollArea className="flex-1 px-6 py-4">
-                    <div className="space-y-5">
+                  <ScrollArea className="flex-1">
+                    <div className="px-6 py-4 space-y-5">
                       <p className="text-sm text-muted-foreground leading-relaxed">{selected.description}</p>
 
                       <div>
@@ -266,7 +306,7 @@ export default function TemplateGalleryModal({ open, onOpenChange, onCreated }: 
                       </div>
                     </div>
                   </ScrollArea>
-                  <div className="p-4 border-t border-border/60">
+                  <div className="p-4 border-t border-border/60 shrink-0">
                     <Button onClick={handleUseTemplate} className="w-full gap-2 bg-gradient-primary hover:opacity-90 shadow-glow">
                       Usar este template <ArrowRight className="h-4 w-4" />
                     </Button>
@@ -285,18 +325,10 @@ export default function TemplateGalleryModal({ open, onOpenChange, onCreated }: 
               )}
             </aside>
           </div>
-
-          <button
-            onClick={() => onOpenChange(false)}
-            className="absolute top-4 right-4 h-8 w-8 rounded-full bg-surface-elevated hover:bg-primary/20 flex items-center justify-center transition-colors"
-            aria-label="Fechar"
-          >
-            <X className="h-4 w-4" />
-          </button>
         </DialogContent>
       </Dialog>
 
-      {/* Confirm form */}
+      {/* Modal de confirmação */}
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent className="max-w-md">
           <div className="space-y-1 mb-2">
@@ -320,9 +352,16 @@ export default function TemplateGalleryModal({ open, onOpenChange, onCreated }: 
             </div>
           </div>
           <div className="flex gap-2 justify-end">
-            <Button variant="outline" onClick={() => setConfirmOpen(false)}>Cancelar</Button>
-            <Button onClick={handleConfirm} className="bg-gradient-primary gap-2">
-              <Sparkles className="h-4 w-4" /> Criar projeto
+            <Button variant="outline" onClick={() => setConfirmOpen(false)} disabled={loading}>
+              Cancelar
+            </Button>
+            <Button onClick={handleConfirm} className="bg-gradient-primary gap-2" disabled={loading || !projectName.trim()}>
+              {loading ? (
+                <span className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              ) : (
+                <Sparkles className="h-4 w-4" />
+              )}
+              Criar projeto
             </Button>
           </div>
         </DialogContent>
