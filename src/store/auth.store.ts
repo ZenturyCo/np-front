@@ -1,20 +1,15 @@
-import { create } from "zustand";
-import { persist } from "zustand/middleware";
-import { setTokens, clearTokens } from '@/lib/auth.tokens';
-
-const API = "https://api.drucci.pt/api/v1";
-
-// ============================================================
-// TYPES
-// ============================================================
+import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
+import { authApi, setTokens, clearTokens } from '@/lib/api';
 
 export interface User {
   id: string;
   email: string;
   fullName: string;
-  role: "admin" | "manager" | "member";
+  role: 'admin' | 'manager' | 'member';
   tenantId: string;
   onboardingComplete: boolean;
+  twoFactorEnabled?: boolean;
 }
 
 interface AuthState {
@@ -23,22 +18,15 @@ interface AuthState {
   refreshToken: string | null;
   isLoading: boolean;
 
-  login: (email: string, password: string) => Promise<void>;
-  register: (data: {
-    email: string;
-    password: string;
-    fullName: string;
-  }) => Promise<void>;
-
+  login: (email: string, password: string) => Promise<any>;
+  loginWithTwoFactor: (email: string, password: string, code: string) => Promise<any>;
+  verifyTwoFactor: (code: string) => Promise<any>;
+  register: (data: { email: string; password: string; fullName: string }) => Promise<void>;
   logout: () => void;
   setUser: (user: User) => void;
   completeOnboarding: () => void;
   refreshSession: () => Promise<void>;
 }
-
-// ============================================================
-// STORE
-// ============================================================
 
 export const useAuthStore = create<AuthState>()(
   persist(
@@ -48,117 +36,107 @@ export const useAuthStore = create<AuthState>()(
       refreshToken: null,
       isLoading: false,
 
-      // ======================================================
-      // LOGIN
-      // ======================================================
-      login: async (email, password) => {
+      // ==================== LOGIN ====================
+      login: async (email: string, password: string) => {
         set({ isLoading: true });
-
         try {
-          const res = await fetch(`${API}/auth/login`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ email, password }),
-          });
+          const data = await authApi.login({ email, password });
 
-          if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(
-              err.message || "Credenciais inválidas."
-            );
+          // === NOVO: Backend pediu 2FA ===
+          if (data.requireTwoFactor || data.twoFactorRequired) {
+            set({ isLoading: false });
+            return {
+              requireTwoFactor: true,
+              email,
+              tempToken: data.tempToken || data.accessToken // caso o backend envie
+            };
           }
 
-          const data = await res.json();
+          // Login normal (sem 2FA)
+          const at = data.tokens?.accessToken || data.accessToken;
+          const rt = data.tokens?.refreshToken || data.refreshToken;
 
-          const accessToken =
-            data.tokens?.accessToken ||
-            data.accessToken;
+          if (!at || !rt) throw new Error('Resposta de autenticação inválida.');
 
-          const refreshToken =
-            data.tokens?.refreshToken ||
-            data.refreshToken;
-
-          setTokens(accessToken, refreshToken);
-
-          const meRes = await fetch(`${API}/me`, {
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-            },
-          });
-
-          if (!meRes.ok) {
-            throw new Error(
-              "Não foi possível carregar o utilizador."
-            );
-          }
-
-          const me: User = await meRes.json();
+          setTokens(at, rt);
+          const me = await authApi.me();
 
           set({
-            user: me,
-            accessToken,
-            refreshToken,
-            isLoading: false,
+            user: { ...me, role: me.role || 'admin', onboardingComplete: true } as User,
+            accessToken: at,
+            refreshToken: rt,
+            isLoading: false
           });
+
+          return { success: true };
+        } catch (err: any) {
+          set({ isLoading: false });
+          throw err;
+        }
+      },
+
+      loginWithTwoFactor: async (email: string, password: string, code: string) => {
+        set({ isLoading: true });
+        try {
+          const data = await authApi.login({ email, password, twoFactorCode: code });
+
+          const at = data.tokens?.accessToken || data.accessToken;
+          const rt = data.tokens?.refreshToken || data.refreshToken;
+
+          if (!at || !rt) throw new Error('Falha ao obter tokens após 2FA.');
+
+          setTokens(at, rt);
+          const me = await authApi.me();
+
+          set({
+            user: { ...me, role: me.role || 'admin', onboardingComplete: true } as User,
+            accessToken: at,
+            refreshToken: rt,
+            isLoading: false
+          });
+
+          return { success: true };
         } catch (err) {
           set({ isLoading: false });
           throw err;
         }
       },
 
-      // ======================================================
-      // REGISTER
-      // ======================================================
+      // ==================== VERIFY 2FA ====================
+      verifyTwoFactor: async (code: string) => {
+        set({ isLoading: true });
+        try {
+          const response = await authApi.verify2FA(code);
+          if (response.twoFactorEnabled) {
+            const currentUser = get().user;
+            if (currentUser) set({ user: { ...currentUser, twoFactorEnabled: true } });
+          }
+          set({ isLoading: false });
+          return response;
+        } catch (err) {
+          set({ isLoading: false });
+          throw err;
+        }
+      },
+
+      // ==================== REGISTER ====================
       register: async (data) => {
         set({ isLoading: true });
-
         try {
-          const res = await fetch(`${API}/auth/register`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify(data),
-          });
+          const tokens = await authApi.register(data);
+          const at = tokens.tokens?.accessToken || tokens.accessToken;
+          const rt = tokens.tokens?.refreshToken || tokens.refreshToken;
 
-          if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(
-              err.message ||
-                "Não foi possível criar conta."
-            );
-          }
+          if (!at || !rt) throw new Error('Resposta de registo inválida.');
 
-          const tokens = await res.json();
-
-          const accessToken =
-            tokens.tokens?.accessToken ||
-            tokens.accessToken;
-
-          const refreshToken =
-            tokens.tokens?.refreshToken ||
-            tokens.refreshToken;
-
-          setTokens(accessToken, refreshToken);
-
-          const meRes = await fetch(`${API}/me`, {
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-            },
-          });
-
-          const me: User = await meRes.json();
+          setTokens(at, rt);
+          const me = await authApi.me();
 
           set({
-            user: {
-              ...me,
-              onboardingComplete: false,
-            },
-            accessToken,
-            refreshToken,
-            isLoading: false,
+            user: { ...me, role: 'admin', onboardingComplete: false } as User,
+            accessToken: at,
+            refreshToken: rt,
+            isLoading: false
           });
         } catch (err) {
           set({ isLoading: false });
@@ -166,104 +144,38 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
-      // ======================================================
-      // LOGOUT
-      // ======================================================
       logout: () => {
         const { refreshToken } = get();
-
-        if (refreshToken) {
-          fetch(`${API}/auth/logout`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ refreshToken }),
-          }).catch(() => {});
-        }
-
+        if (refreshToken) authApi.logout(refreshToken).catch(() => {});
         clearTokens();
-
-        set({
-          user: null,
-          accessToken: null,
-          refreshToken: null,
-        });
+        set({ user: null, accessToken: null, refreshToken: null });
       },
 
-      // ======================================================
-      // USER UPDATE
-      // ======================================================
       setUser: (user) => set({ user }),
-
       completeOnboarding: () => {
         const { user } = get();
-
-        if (!user) return;
-
-        set({
-          user: {
-            ...user,
-            onboardingComplete: true,
-          },
-        });
+        if (user) set({ user: { ...user, onboardingComplete: true } });
       },
 
-      // ======================================================
-      // REFRESH SESSION
-      // ======================================================
       refreshSession: async () => {
         const { refreshToken } = get();
-
         if (!refreshToken) return;
-
         try {
-          const res = await fetch(
-            `${API}/auth/refresh`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                refreshToken,
-              }),
-            }
-          );
-
-          if (!res.ok) throw new Error();
-
-          const data = await res.json();
-
-          setTokens(
-            data.accessToken,
-            data.refreshToken
-          );
-
-          set({
-            accessToken: data.accessToken,
-            refreshToken: data.refreshToken,
-          });
+          const data = await authApi.refresh(refreshToken);
+          setTokens(data.accessToken, data.refreshToken);
+          set({ accessToken: data.accessToken, refreshToken: data.refreshToken });
         } catch {
           get().logout();
         }
       },
     }),
+
     {
-      name: "drucci-auth",
-
-      partialize: (state) => ({
-        user: state.user,
-        accessToken: state.accessToken,
-        refreshToken: state.refreshToken,
-      }),
-
+      name: 'ngola-auth',
+      partialize: (s) => ({ accessToken: s.accessToken, refreshToken: s.refreshToken, user: s.user }),
       onRehydrateStorage: () => (state) => {
         if (state?.accessToken && state?.refreshToken) {
-          setTokens(
-            state.accessToken,
-            state.refreshToken
-          );
+          setTokens(state.accessToken, state.refreshToken);
         }
       },
     }
