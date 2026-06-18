@@ -18,7 +18,7 @@ import { useToast } from "@/hooks/use-toast";
 import { PROJECT_TEMPLATES, INDUSTRIES } from "@/data/projectTemplates";
 import type { ProjectTemplate } from "@/lib/types";
 import { useProjectsStore } from "@/store/projects.store";
-import api from "@/lib/api";
+import { projectApi } from "@/lib/api";
 
 const ICONS: Record<string, LucideIcon> = {
   Radio, HardHat, Flame, Code, Stethoscope, GraduationCap, Landmark,
@@ -65,7 +65,7 @@ export default function TemplateGalleryModal({ open, onOpenChange, onCreated }: 
     setLoading(true);
     try {
       // Tenta criar na API primeiro
-      const res = await api.post("/projects", {
+      const res = await projectApi.create({
         name: projectName.trim(),
         description: projectDesc.trim() || undefined,
         deadline: projectDeadline || undefined,
@@ -75,7 +75,7 @@ export default function TemplateGalleryModal({ open, onOpenChange, onCreated }: 
         phases: selected.phases,
         tasks: selected.tasks,
       });
-      const projectId = res.data?.id || res.data?.data?.id;
+      const projectId = (res as any)?.id;
       toast({
         title: "Projeto criado!",
         description: `${projectName} foi criado com ${selected.tasks.length} tarefas pré-configuradas.`,
