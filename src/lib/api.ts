@@ -697,6 +697,8 @@ export const teamsApi = {
   ): Promise<{ joined: boolean; teamId: string; teamName: string; userId: string }> =>
     api.post(`/team/join/${token}`, data).then((r) => r.data),
 
+};
+
 // ✅ teamApi mantido como alias para não quebrar imports existentes noutros ficheiros
 export const teamApi = {
   createInviteLink: teamsApi.createInviteLink,
