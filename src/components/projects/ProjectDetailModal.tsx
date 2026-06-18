@@ -93,8 +93,8 @@ export default function ProjectDetailModal({ project, open, onOpenChange }: Prop
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[1100px] h-[88vh] p-0 overflow-hidden border-border/60 glass-strong">
-        <div className="flex flex-col h-full">
+      <DialogContent className="max-w-[1100px] h-[88vh] p-0 overflow-hidden border-border/60 glass-strong [&>button]:hidden">
+        <div className="flex flex-col h-full overflow-hidden">
           {/* Header */}
           <div className="px-7 py-5 border-b border-border/60 relative overflow-hidden">
             <div className="absolute inset-0 bg-gradient-mesh opacity-50 pointer-events-none" />

@@ -142,7 +142,7 @@ export default function TemplateGalleryModal({ open, onOpenChange, onCreated }: 
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-[1100px] h-[90vh] p-0 overflow-hidden border-border/60 [&>button]:hidden">
+      <DialogContent className="max-w-[1100px] h-[85vh] max-h-[85vh] p-0 overflow-hidden border-border/60 [&>button]:hidden">
         <AnimatePresence mode="wait">
 
           {/* ═══════════════ STEP 1 — GALERIA ═══════════════ */}
@@ -265,7 +265,7 @@ export default function TemplateGalleryModal({ open, onOpenChange, onCreated }: 
               className="flex flex-col h-full"
             >
               {/* Header */}
-              <div className="px-6 py-4 border-b border-border/60 flex items-center justify-between shrink-0">
+              <div className="px-6 py-3 border-b border-border/60 flex items-center justify-between shrink-0">
                 <div className="flex items-center gap-3">
                   <Button variant="ghost" size="icon" onClick={() => setStep("gallery")}>
                     <ArrowLeft className="h-4 w-4" />
@@ -283,8 +283,8 @@ export default function TemplateGalleryModal({ open, onOpenChange, onCreated }: 
 
               <div className="flex flex-1 overflow-hidden">
                 {/* Formulário */}
-                <div className="flex-1 overflow-y-auto p-6">
-                  <div className="max-w-xl space-y-5">
+                <div className="flex-1 overflow-y-auto p-5">
+                  <div className="max-w-xl space-y-4">
                     <div className="space-y-1.5">
                       <Label htmlFor="p-name">Nome do projecto *</Label>
                       <Input
@@ -354,7 +354,7 @@ export default function TemplateGalleryModal({ open, onOpenChange, onCreated }: 
                 </div>
 
                 {/* Preview lateral */}
-                <div className="w-72 border-l border-border/60 bg-muted/20 overflow-y-auto p-4 shrink-0">
+                <div className="w-64 border-l border-border/60 bg-muted/20 overflow-y-auto p-4 shrink-0 hidden lg:block">
                   <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
                     Boas práticas
                   </p>
@@ -369,7 +369,7 @@ export default function TemplateGalleryModal({ open, onOpenChange, onCreated }: 
                 </div>
               </div>
 
-              <div className="px-6 py-4 border-t border-border/60 flex justify-end shrink-0">
+              <div className="px-6 py-3 border-t border-border/60 flex justify-end shrink-0">
                 <Button
                   onClick={handleToTasks}
                   disabled={!projectName.trim()}
