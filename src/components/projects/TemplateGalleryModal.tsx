@@ -1,10 +1,11 @@
 import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Search, Sparkles, ArrowRight, Clock, Users, Target, CheckCircle2, X,
-  Radio, HardHat, Flame, Code, Stethoscope, GraduationCap, Landmark, ShoppingBag,
-  Truck, Sprout, Megaphone, Scale, Film, Zap, Factory, Hotel, Briefcase,
-  FlaskConical, Building2, FolderKanban, type LucideIcon,
+  Search, Sparkles, ArrowRight, ArrowLeft, Clock, Users, Target,
+  CheckCircle2, X, Radio, HardHat, Flame, Code, Stethoscope,
+  GraduationCap, Landmark, ShoppingBag, Truck, Sprout, Megaphone,
+  Scale, Film, Zap, Factory, Hotel, Briefcase, FlaskConical,
+  Building2, FolderKanban, Plus, Trash2, type LucideIcon,
 } from "lucide-react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -13,18 +14,21 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { PROJECT_TEMPLATES, INDUSTRIES } from "@/data/projectTemplates";
-import type { ProjectTemplate } from "@/lib/types";
+import type { ProjectTemplate, TemplateTask } from "@/lib/types";
 import { useProjectsStore } from "@/store/projects.store";
 import { projectApi } from "@/lib/api";
 
 const ICONS: Record<string, LucideIcon> = {
   Radio, HardHat, Flame, Code, Stethoscope, GraduationCap, Landmark,
-  ShoppingBag, Truck, Sprout, Megaphone, Users, Scale, Film, Zap, Factory,
-  Hotel, Briefcase, FlaskConical, Building2, FolderKanban,
+  ShoppingBag, Truck, Sprout, Megaphone, Users, Scale, Film, Zap,
+  Factory, Hotel, Briefcase, FlaskConical, Building2, FolderKanban,
 };
+
+type Step = "gallery" | "configure" | "tasks";
 
 interface Props {
   open: boolean;
@@ -35,14 +39,21 @@ interface Props {
 export default function TemplateGalleryModal({ open, onOpenChange, onCreated }: Props) {
   const { toast } = useToast();
   const createFromTemplate = useProjectsStore((s) => s.createFromTemplate);
-  const [industry, setIndustry] = useState<string>("Todas");
+
+  const [step, setStep] = useState<Step>("gallery");
+  const [industry, setIndustry] = useState("Todas");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<ProjectTemplate | null>(null);
-  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  // Step 2 — configuração
   const [projectName, setProjectName] = useState("");
   const [projectDesc, setProjectDesc] = useState("");
   const [projectDeadline, setProjectDeadline] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [methodology, setMethodology] = useState("");
+
+  // Step 3 — tarefas editáveis
+  const [tasks, setTasks] = useState<TemplateTask[]>([]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -53,319 +64,431 @@ export default function TemplateGalleryModal({ open, onOpenChange, onCreated }: 
     });
   }, [industry, query]);
 
-  const handleUseTemplate = () => {
-    if (!selected) return;
-    setProjectName(selected.name);
-    setProjectDesc(selected.description);
-    setConfirmOpen(true);
+  const handleSelectTemplate = (t: ProjectTemplate) => {
+    setSelected(t);
+    setProjectName(t.name);
+    setProjectDesc(t.description);
+    setMethodology(t.methodology);
+    setTasks(t.tasks.map((tk) => ({ ...tk })));
+    setStep("configure");
   };
 
-  const handleConfirm = async () => {
+  const handleToTasks = () => {
+    if (!projectName.trim()) return;
+    setStep("tasks");
+  };
+
+  const handleAddTask = () => {
+    setTasks((prev) => [
+      ...prev,
+      { title: "", phase: selected?.phases[0] ?? "", priority: "normal", estimatedDays: 1 },
+    ]);
+  };
+
+  const handleRemoveTask = (i: number) => setTasks((prev) => prev.filter((_, idx) => idx !== i));
+
+  const handleTaskChange = (i: number, field: keyof TemplateTask, value: string | number) => {
+    setTasks((prev) => prev.map((t, idx) => idx === i ? { ...t, [field]: value } : t));
+  };
+
+  const handleCreate = async () => {
     if (!selected || !projectName.trim()) return;
     setLoading(true);
     try {
-      // Tenta criar na API primeiro
       const res = await projectApi.create({
         name: projectName.trim(),
         description: projectDesc.trim() || undefined,
         deadline: projectDeadline || undefined,
         templateId: selected.id,
         industry: selected.industry,
-        methodology: selected.methodology,
+        methodology,
         phases: selected.phases,
-        tasks: selected.tasks,
+        tasks: tasks.filter((t) => t.title.trim()),
       });
       const projectId = (res as any)?.id;
-      toast({
-        title: "Projeto criado!",
-        description: `${projectName} foi criado com ${selected.tasks.length} tarefas pré-configuradas.`,
-      });
-      setConfirmOpen(false);
-      onOpenChange(false);
+      toast({ title: "Projeto criado!", description: `${projectName} criado com ${tasks.length} tarefas.` });
+      handleClose();
       onCreated?.(projectId);
-    } catch (err: any) {
-      // Se a API falhar, guarda localmente como fallback
+    } catch {
+      // fallback local
       const p = createFromTemplate({
-        template: selected,
+        template: { ...selected!, tasks, methodology: methodology as any },
         name: projectName.trim(),
         description: projectDesc.trim() || undefined,
         deadline: projectDeadline || undefined,
       });
-      toast({
-        title: "Projeto criado localmente",
-        description: `${p.name} foi guardado com ${p.tasks.length} tarefas. Será sincronizado quando a ligação for restaurada.`,
-        variant: "destructive",
-      });
-      setConfirmOpen(false);
-      onOpenChange(false);
+      toast({ title: "Guardado localmente", description: "Será sincronizado quando a ligação for restaurada.", variant: "destructive" });
+      handleClose();
       onCreated?.(p.id);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleClose = () => {
+    onOpenChange(false);
+    setTimeout(() => {
+      setStep("gallery");
       setSelected(null);
       setProjectName("");
       setProjectDesc("");
       setProjectDeadline("");
-    }
+      setMethodology("");
+      setTasks([]);
+      setQuery("");
+      setIndustry("Todas");
+    }, 300);
   };
 
   return (
-    <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        {/* [&>button]:hidden esconde o X automático do shadcn para usarmos o nosso dentro do grid */}
-        <DialogContent className="max-w-[1200px] h-[88vh] p-0 overflow-hidden border-border/60 glass-strong [&>button]:hidden">
-          <div className="grid h-full grid-cols-[260px_1fr_400px] relative">
+    <Dialog open={open} onOpenChange={handleClose}>
+      <DialogContent className="max-w-[1100px] h-[90vh] p-0 overflow-hidden border-border/60 [&>button]:hidden">
+        <AnimatePresence mode="wait">
 
-            {/* Botão fechar — dentro do grid, posicionado absolutamente */}
-            <button
-              onClick={() => onOpenChange(false)}
-              className="absolute top-4 right-4 z-50 h-8 w-8 rounded-full bg-surface-elevated hover:bg-primary/20 flex items-center justify-center transition-colors"
-              aria-label="Fechar"
+          {/* ═══════════════ STEP 1 — GALERIA ═══════════════ */}
+          {step === "gallery" && (
+            <motion.div
+              key="gallery"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0, x: -40 }}
+              className="flex h-full"
             >
-              <X className="h-4 w-4" />
-            </button>
-
-            {/* Sidebar — industries */}
-            <aside className="border-r border-border/60 bg-surface/60 flex flex-col min-h-0">
-              <div className="px-5 py-5 border-b border-border/60 shrink-0">
-                <div className="flex items-center gap-2">
-                  <div className="h-9 w-9 rounded-xl bg-gradient-primary flex items-center justify-center shadow-glow">
-                    <Sparkles className="h-4 w-4 text-white" />
-                  </div>
-                  <div>
-                    <p className="font-display font-bold text-sm">Templates</p>
-                    <p className="text-[11px] text-muted-foreground">{PROJECT_TEMPLATES.length} disponíveis</p>
+              {/* Sidebar indústrias */}
+              <div className="w-56 border-r border-border/60 bg-muted/30 flex flex-col h-full">
+                <div className="px-4 py-4 border-b border-border/60 shrink-0">
+                  <div className="flex items-center gap-2">
+                    <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center">
+                      <Sparkles className="h-4 w-4 text-white" />
+                    </div>
+                    <div>
+                      <p className="font-bold text-sm">Templates</p>
+                      <p className="text-[11px] text-muted-foreground">{PROJECT_TEMPLATES.length} disponíveis</p>
+                    </div>
                   </div>
                 </div>
-              </div>
-              <ScrollArea className="flex-1">
-                <div className="p-2">
+                <div className="flex-1 overflow-y-auto p-2">
                   {["Todas", ...INDUSTRIES].map((ind) => {
                     const count = ind === "Todas"
                       ? PROJECT_TEMPLATES.length
                       : PROJECT_TEMPLATES.filter((t) => t.industry === ind).length;
-                    const active = industry === ind;
                     return (
                       <button
                         key={ind}
                         onClick={() => setIndustry(ind)}
                         className={cn(
-                          "w-full text-left px-3 py-2.5 rounded-lg text-sm flex items-center justify-between transition-all",
-                          active
-                            ? "bg-primary/15 text-foreground ring-1 ring-primary/30"
-                            : "text-muted-foreground hover:bg-surface-elevated hover:text-foreground"
+                          "w-full text-left px-3 py-2 rounded-lg text-sm flex items-center justify-between transition-all mb-0.5",
+                          industry === ind
+                            ? "bg-primary/15 text-foreground font-medium"
+                            : "text-muted-foreground hover:bg-accent hover:text-foreground"
                         )}
                       >
                         <span className="truncate">{ind}</span>
-                        <span className={cn("text-[10px] font-mono", active ? "text-primary" : "text-muted-foreground/60")}>
-                          {count}
-                        </span>
+                        <span className="text-[10px] font-mono text-muted-foreground/60">{count}</span>
                       </button>
                     );
                   })}
                 </div>
-              </ScrollArea>
-            </aside>
-
-            {/* Grid de templates */}
-            <div className="flex flex-col min-h-0 overflow-hidden">
-              <div className="px-6 py-5 border-b border-border/60 flex items-center justify-between gap-4 shrink-0">
-                <div>
-                  <h2 className="font-display text-xl font-bold">Galeria de Templates</h2>
-                  <p className="text-xs text-muted-foreground">
-                    Comece com o template ideal para o seu setor — tarefas, fases e boas práticas prontas.
-                  </p>
-                </div>
-                <div className="relative w-72">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Buscar template…"
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    className="pl-9 bg-surface border-border/60"
-                  />
-                </div>
               </div>
-              <ScrollArea className="flex-1">
-                <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <AnimatePresence mode="popLayout">
-                    {filtered.map((t, i) => {
+
+              {/* Grid de templates */}
+              <div className="flex-1 flex flex-col h-full overflow-hidden">
+                {/* Header */}
+                <div className="px-6 py-4 border-b border-border/60 flex items-center justify-between gap-4 shrink-0">
+                  <div>
+                    <h2 className="text-xl font-bold">Galeria de Templates</h2>
+                    <p className="text-xs text-muted-foreground">Escolha o template ideal para o seu sector</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="relative w-64">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        placeholder="Buscar template…"
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
+                        className="pl-9"
+                      />
+                    </div>
+                    <Button variant="ghost" size="icon" onClick={handleClose}>
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Cards — scroll aqui */}
+                <div className="flex-1 overflow-y-auto p-6">
+                  <div className="grid grid-cols-2 xl:grid-cols-3 gap-3">
+                    {filtered.map((t) => {
                       const Icon = ICONS[t.icon] ?? FolderKanban;
-                      const isSelected = selected?.id === t.id;
                       return (
-                        <motion.button
+                        <button
                           key={t.id}
-                          layout
-                          initial={{ opacity: 0, y: 8 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0 }}
-                          transition={{ duration: 0.18, delay: Math.min(i, 8) * 0.015 }}
-                          onClick={() => setSelected(t)}
-                          className={cn(
-                            "text-left p-4 rounded-xl border transition-all hover-lift relative overflow-hidden group",
-                            isSelected
-                              ? "border-primary/60 bg-primary/8 ring-1 ring-primary/40"
-                              : "border-border/60 bg-gradient-card hover:border-primary/40"
-                          )}
+                          onClick={() => handleSelectTemplate(t)}
+                          className="text-left p-4 rounded-xl border border-border/60 bg-card hover:border-primary/50 hover:bg-primary/5 transition-all group"
                         >
                           <div className="flex items-start gap-3">
-                            <div className={cn(
-                              "h-10 w-10 rounded-lg flex items-center justify-center shrink-0 transition-colors",
-                              isSelected ? "bg-gradient-primary text-white" : "bg-surface-elevated text-primary group-hover:bg-primary/15"
-                            )}>
-                              <Icon className="h-5 w-5" />
+                            <div className="h-10 w-10 rounded-lg bg-muted flex items-center justify-center shrink-0 group-hover:bg-primary/15 transition-colors">
+                              <Icon className="h-5 w-5 text-primary" />
                             </div>
                             <div className="min-w-0 flex-1">
                               <p className="font-semibold text-sm leading-snug line-clamp-2">{t.name}</p>
                               <p className="text-[11px] text-muted-foreground mt-0.5">{t.industry}</p>
                             </div>
                           </div>
-                          <p className="text-xs text-muted-foreground mt-3 line-clamp-2">{t.description}</p>
+                          <p className="text-xs text-muted-foreground mt-2 line-clamp-2">{t.description}</p>
                           <div className="flex items-center gap-3 mt-3 text-[10px] text-muted-foreground">
-                            <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{t.durationWeeks}w</span>
+                            <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{t.durationWeeks}s</span>
                             <span className="flex items-center gap-1"><CheckCircle2 className="h-3 w-3" />{t.tasks.length} tarefas</span>
                             <span className="flex items-center gap-1"><Users className="h-3 w-3" />{t.teamSize}</span>
                           </div>
-                        </motion.button>
+                        </button>
                       );
                     })}
-                  </AnimatePresence>
-                  {filtered.length === 0 && (
-                    <div className="col-span-full text-center py-16 text-muted-foreground">
-                      Nenhum template corresponde aos filtros.
-                    </div>
-                  )}
+                    {filtered.length === 0 && (
+                      <div className="col-span-full text-center py-20 text-muted-foreground">
+                        Nenhum template encontrado.
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </ScrollArea>
-            </div>
+              </div>
+            </motion.div>
+          )}
 
-            {/* Preview */}
-            <aside className="border-l border-border/60 bg-surface/40 flex flex-col min-h-0 overflow-hidden">
-              {selected ? (
-                <>
-                  <div className="px-6 py-5 border-b border-border/60 shrink-0">
-                    <Badge variant="outline" className="mb-2 border-primary/40 text-primary text-[10px]">
-                      {selected.methodology}
-                    </Badge>
-                    <h3 className="font-display font-bold text-lg leading-tight">{selected.name}</h3>
-                    <p className="text-xs text-muted-foreground mt-1">{selected.industry}</p>
+          {/* ═══════════════ STEP 2 — CONFIGURAR ═══════════════ */}
+          {step === "configure" && selected && (
+            <motion.div
+              key="configure"
+              initial={{ opacity: 0, x: 40 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -40 }}
+              className="flex flex-col h-full"
+            >
+              {/* Header */}
+              <div className="px-6 py-4 border-b border-border/60 flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-3">
+                  <Button variant="ghost" size="icon" onClick={() => setStep("gallery")}>
+                    <ArrowLeft className="h-4 w-4" />
+                  </Button>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Passo 1 de 2</p>
+                    <h2 className="text-lg font-bold">Configurar projecto</h2>
                   </div>
-                  <ScrollArea className="flex-1">
-                    <div className="px-6 py-4 space-y-5">
-                      <p className="text-sm text-muted-foreground leading-relaxed">{selected.description}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-primary border-primary/40">{selected.industry}</Badge>
+                  <Button variant="ghost" size="icon" onClick={handleClose}><X className="h-4 w-4" /></Button>
+                </div>
+              </div>
 
-                      <div>
-                        <p className="text-[11px] uppercase tracking-wider text-muted-foreground/70 font-semibold mb-2">Fases</p>
-                        <div className="flex flex-wrap gap-1.5">
-                          {selected.phases.map((p) => (
-                            <Badge key={p} variant="secondary" className="text-[10px]">{p}</Badge>
-                          ))}
-                        </div>
+              <div className="flex flex-1 overflow-hidden">
+                {/* Formulário */}
+                <div className="flex-1 overflow-y-auto p-6">
+                  <div className="max-w-xl space-y-5">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="p-name">Nome do projecto *</Label>
+                      <Input
+                        id="p-name"
+                        value={projectName}
+                        onChange={(e) => setProjectName(e.target.value)}
+                        placeholder="Ex: Rollout Telecom Angola 2025"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="p-desc">Descrição</Label>
+                      <Textarea
+                        id="p-desc"
+                        rows={4}
+                        value={projectDesc}
+                        onChange={(e) => setProjectDesc(e.target.value)}
+                        placeholder="Descreva o objectivo do projecto…"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="p-deadline">Prazo final</Label>
+                        <Input
+                          id="p-deadline"
+                          type="date"
+                          value={projectDeadline}
+                          onChange={(e) => setProjectDeadline(e.target.value)}
+                        />
                       </div>
-
-                      <div>
-                        <p className="text-[11px] uppercase tracking-wider text-muted-foreground/70 font-semibold mb-2">
-                          Tarefas pré-configuradas ({selected.tasks.length})
-                        </p>
-                        <div className="space-y-1.5">
-                          {selected.tasks.slice(0, 6).map((t, i) => (
-                            <div key={i} className="text-xs flex items-start gap-2 p-2 rounded-md bg-surface-elevated/60">
-                              <div className="h-1.5 w-1.5 rounded-full bg-primary mt-1.5 shrink-0" />
-                              <div className="min-w-0">
-                                <p className="font-medium truncate">{t.title}</p>
-                                <p className="text-muted-foreground/70 text-[10px]">{t.phase} · {t.estimatedDays}d</p>
-                              </div>
-                            </div>
-                          ))}
-                          {selected.tasks.length > 6 && (
-                            <p className="text-[10px] text-muted-foreground pl-2">+ {selected.tasks.length - 6} mais…</p>
-                          )}
-                        </div>
-                      </div>
-
-                      <div>
-                        <p className="text-[11px] uppercase tracking-wider text-muted-foreground/70 font-semibold mb-2">Boas práticas</p>
-                        <ul className="space-y-1.5">
-                          {selected.bestPractices.slice(0, 3).map((b, i) => (
-                            <li key={i} className="text-xs text-muted-foreground flex gap-2">
-                              <Sparkles className="h-3 w-3 text-primary mt-0.5 shrink-0" />
-                              <span>{b}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-
-                      <div>
-                        <p className="text-[11px] uppercase tracking-wider text-muted-foreground/70 font-semibold mb-2">KPIs sugeridos</p>
-                        <div className="flex flex-wrap gap-1.5">
-                          {selected.kpis.map((k) => (
-                            <Badge key={k} variant="outline" className="text-[10px] border-border/60">
-                              <Target className="h-2.5 w-2.5 mr-1" />{k}
-                            </Badge>
-                          ))}
-                        </div>
+                      <div className="space-y-1.5">
+                        <Label>Metodologia</Label>
+                        <Select value={methodology} onValueChange={setMethodology}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Escolha…" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {["Scrum", "Kanban", "Waterfall", "PRINCE2", "Lean", "Agile"].map((m) => (
+                              <SelectItem key={m} value={m}>{m}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
                     </div>
-                  </ScrollArea>
-                  <div className="p-4 border-t border-border/60 shrink-0">
-                    <Button onClick={handleUseTemplate} className="w-full gap-2 bg-gradient-primary hover:opacity-90 shadow-glow">
-                      Usar este template <ArrowRight className="h-4 w-4" />
-                    </Button>
+
+                    {/* Fases */}
+                    <div className="space-y-1.5">
+                      <Label>Fases do projecto</Label>
+                      <div className="flex flex-wrap gap-1.5">
+                        {selected.phases.map((p) => (
+                          <Badge key={p} variant="secondary">{p}</Badge>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* KPIs */}
+                    <div className="space-y-1.5">
+                      <Label>KPIs sugeridos</Label>
+                      <div className="flex flex-wrap gap-1.5">
+                        {selected.kpis.map((k) => (
+                          <Badge key={k} variant="outline" className="text-[11px]">
+                            <Target className="h-2.5 w-2.5 mr-1" />{k}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
                   </div>
-                </>
-              ) : (
-                <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
-                  <div className="h-16 w-16 rounded-2xl bg-gradient-primary/10 flex items-center justify-center mb-4">
-                    <Sparkles className="h-7 w-7 text-primary" />
-                  </div>
-                  <p className="font-display font-semibold">Selecione um template</p>
-                  <p className="text-xs text-muted-foreground mt-1 max-w-[240px]">
-                    Veja fases, tarefas, boas práticas e KPIs antes de criar o projeto.
+                </div>
+
+                {/* Preview lateral */}
+                <div className="w-72 border-l border-border/60 bg-muted/20 overflow-y-auto p-4 shrink-0">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+                    Boas práticas
                   </p>
+                  <ul className="space-y-2">
+                    {selected.bestPractices.map((b, i) => (
+                      <li key={i} className="text-xs text-muted-foreground flex gap-2">
+                        <Sparkles className="h-3 w-3 text-primary mt-0.5 shrink-0" />
+                        <span>{b}</span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
-              )}
-            </aside>
-          </div>
-        </DialogContent>
-      </Dialog>
+              </div>
 
-      {/* Modal de confirmação */}
-      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <DialogContent className="max-w-md">
-          <div className="space-y-1 mb-2">
-            <h3 className="font-display text-lg font-bold">Criar projeto</h3>
-            <p className="text-xs text-muted-foreground">
-              Baseado em <span className="text-primary">{selected?.name}</span>
-            </p>
-          </div>
-          <div className="space-y-4 py-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="np-name">Nome do projeto *</Label>
-              <Input id="np-name" value={projectName} onChange={(e) => setProjectName(e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="np-desc">Descrição</Label>
-              <Textarea id="np-desc" rows={3} value={projectDesc} onChange={(e) => setProjectDesc(e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="np-dl">Prazo final</Label>
-              <Input id="np-dl" type="date" value={projectDeadline} onChange={(e) => setProjectDeadline(e.target.value)} />
-            </div>
-          </div>
-          <div className="flex gap-2 justify-end">
-            <Button variant="outline" onClick={() => setConfirmOpen(false)} disabled={loading}>
-              Cancelar
-            </Button>
-            <Button onClick={handleConfirm} className="bg-gradient-primary gap-2" disabled={loading || !projectName.trim()}>
-              {loading ? (
-                <span className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              ) : (
-                <Sparkles className="h-4 w-4" />
-              )}
-              Criar projeto
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </>
+              <div className="px-6 py-4 border-t border-border/60 flex justify-end shrink-0">
+                <Button
+                  onClick={handleToTasks}
+                  disabled={!projectName.trim()}
+                  className="gap-2 bg-primary"
+                >
+                  Configurar tarefas <ArrowRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </motion.div>
+          )}
+
+          {/* ═══════════════ STEP 3 — TAREFAS ═══════════════ */}
+          {step === "tasks" && selected && (
+            <motion.div
+              key="tasks"
+              initial={{ opacity: 0, x: 40 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0 }}
+              className="flex flex-col h-full"
+            >
+              {/* Header */}
+              <div className="px-6 py-4 border-b border-border/60 flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-3">
+                  <Button variant="ghost" size="icon" onClick={() => setStep("configure")}>
+                    <ArrowLeft className="h-4 w-4" />
+                  </Button>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Passo 2 de 2 — {projectName}</p>
+                    <h2 className="text-lg font-bold">Tarefas do projecto</h2>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">{tasks.filter(t => t.title.trim()).length} tarefas</span>
+                  <Button variant="ghost" size="icon" onClick={handleClose}><X className="h-4 w-4" /></Button>
+                </div>
+              </div>
+
+              {/* Lista de tarefas */}
+              <div className="flex-1 overflow-y-auto p-6">
+                <div className="space-y-2 max-w-3xl">
+                  {tasks.map((task, i) => (
+                    <div key={i} className="flex items-start gap-3 p-3 rounded-lg border border-border/60 bg-card">
+                      <div className="flex-1 grid grid-cols-12 gap-2 items-center">
+                        <Input
+                          className="col-span-5 h-8 text-sm"
+                          placeholder="Nome da tarefa"
+                          value={task.title}
+                          onChange={(e) => handleTaskChange(i, "title", e.target.value)}
+                        />
+                        <Select
+                          value={task.phase}
+                          onValueChange={(v) => handleTaskChange(i, "phase", v)}
+                        >
+                          <SelectTrigger className="col-span-3 h-8 text-xs">
+                            <SelectValue placeholder="Fase" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {selected.phases.map((p) => (
+                              <SelectItem key={p} value={p}>{p}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Select
+                          value={task.priority}
+                          onValueChange={(v) => handleTaskChange(i, "priority", v)}
+                        >
+                          <SelectTrigger className="col-span-2 h-8 text-xs">
+                            <SelectValue placeholder="Prioridade" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="low">Baixa</SelectItem>
+                            <SelectItem value="normal">Normal</SelectItem>
+                            <SelectItem value="high">Alta</SelectItem>
+                            <SelectItem value="urgent">Urgente</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Input
+                          className="col-span-2 h-8 text-xs"
+                          type="number"
+                          min={1}
+                          placeholder="Dias"
+                          value={task.estimatedDays}
+                          onChange={(e) => handleTaskChange(i, "estimatedDays", Number(e.target.value))}
+                        />
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                        onClick={() => handleRemoveTask(i)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  ))}
+
+                  <Button variant="outline" size="sm" onClick={handleAddTask} className="w-full gap-2 border-dashed">
+                    <Plus className="h-4 w-4" /> Adicionar tarefa
+                  </Button>
+                </div>
+              </div>
+
+              <div className="px-6 py-4 border-t border-border/60 flex justify-between items-center shrink-0">
+                <p className="text-xs text-muted-foreground">
+                  Pode editar as tarefas depois de criar o projecto.
+                </p>
+                <Button onClick={handleCreate} disabled={loading || !projectName.trim()} className="gap-2 bg-primary">
+                  {loading
+                    ? <span className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    : <Sparkles className="h-4 w-4" />
+                  }
+                  Criar projecto
+                </Button>
+              </div>
+            </motion.div>
+          )}
+
+        </AnimatePresence>
+      </DialogContent>
+    </Dialog>
   );
 }
